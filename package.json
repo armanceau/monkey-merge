@@ -1,0 +1,115 @@
+{
+  "name": "monkey-merge",
+  "displayName": "Monkey Merge — IntelliJ Style Merge Editor",
+  "description": "Three-way merge conflict editor that reproduces IntelliJ IDEA's merge resolution experience",
+  "version": "0.1.0",
+  "publisher": "monkey-merge",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "keywords": ["git", "merge", "conflict", "intellij"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "monkeyMerge.openMergeEditor",
+        "title": "Open Merge Editor (IntelliJ Style)",
+        "category": "Monkey Merge"
+      },
+      {
+        "command": "monkeyMerge.acceptYours",
+        "title": "Accept Yours (Current Branch)",
+        "category": "Monkey Merge"
+      },
+      {
+        "command": "monkeyMerge.acceptTheirs",
+        "title": "Accept Theirs (Incoming Branch)",
+        "category": "Monkey Merge"
+      },
+      {
+        "command": "monkeyMerge.acceptBoth",
+        "title": "Accept Both Changes",
+        "category": "Monkey Merge"
+      },
+      {
+        "command": "monkeyMerge.nextConflict",
+        "title": "Go to Next Conflict",
+        "category": "Monkey Merge"
+      },
+      {
+        "command": "monkeyMerge.previousConflict",
+        "title": "Go to Previous Conflict",
+        "category": "Monkey Merge"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "monkeyMerge.acceptYours",
+        "key": "ctrl+alt+y",
+        "when": "monkeyMergeEditorActive"
+      },
+      {
+        "command": "monkeyMerge.acceptTheirs",
+        "key": "ctrl+alt+t",
+        "when": "monkeyMergeEditorActive"
+      },
+      {
+        "command": "monkeyMerge.acceptBoth",
+        "key": "ctrl+alt+b",
+        "when": "monkeyMergeEditorActive"
+      },
+      {
+        "command": "monkeyMerge.nextConflict",
+        "key": "alt+down",
+        "when": "monkeyMergeEditorActive"
+      },
+      {
+        "command": "monkeyMerge.previousConflict",
+        "key": "alt+up",
+        "when": "monkeyMergeEditorActive"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "monkeyMerge.openMergeEditor",
+          "when": "resourceHasConflicts",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "monkeyMerge.openMergeEditor",
+          "when": "resourceHasConflicts",
+          "group": "1_modification"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Monkey Merge",
+      "properties": {
+        "monkeyMerge.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically prompt to open merge editor when a file with conflicts is opened"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.5",
+    "@types/vscode": "^1.85.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.3.3"
+  }
+}

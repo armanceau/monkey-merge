@@ -1,0 +1,329 @@
+/* ═══════════════════════════════════════════════════════════════
+   Monkey Merge — IntelliJ-style Three-Way Merge Editor
+   Adaptive to VS Code theme via CSS custom properties
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Colour tokens — fall back to sensible dark-theme values */
+  --mm-yours-bg:         rgba(57, 153, 57,  0.18);
+  --mm-yours-bg-hi:      rgba(57, 153, 57,  0.30);
+  --mm-yours-border:     rgba(80, 200, 80,  0.55);
+  --mm-yours-text:       #6ed06e;
+
+  --mm-theirs-bg:        rgba(42, 100, 200, 0.20);
+  --mm-theirs-bg-hi:     rgba(42, 120, 230, 0.32);
+  --mm-theirs-border:    rgba(80, 140, 255, 0.55);
+  --mm-theirs-text:      #7ab0ff;
+
+  --mm-conflict-bg:      rgba(190, 100, 10, 0.16);
+  --mm-conflict-border:  rgba(255, 140, 30, 0.65);
+  --mm-conflict-text:    #ff9944;
+
+  --mm-resolved-bg:      rgba(30, 110, 30,  0.14);
+  --mm-resolved-border:  rgba(60, 180, 60,  0.40);
+  --mm-resolved-text:    #7fd97f;
+
+  --mm-font:     var(--vscode-editor-font-family,   'Consolas', 'Courier New', monospace);
+  --mm-fz:       var(--vscode-editor-font-size,     13px);
+  --mm-lh:       1.45;
+
+  --mm-gutter-bg:    var(--vscode-editorGutter-background,         #1e1e1e);
+  --mm-gutter-fg:    var(--vscode-editorLineNumber-foreground,      #5a5a5a);
+  --mm-sep:          var(--vscode-editorGroup-border,               #3c3c3c);
+  --mm-toolbar-bg:   var(--vscode-editorGroupHeader-tabsBackground, #252526);
+  --mm-panel-hdr-bg: var(--vscode-tab-inactiveBackground,          #2d2d30);
+  --mm-editor-bg:    var(--vscode-editor-background,               #1e1e1e);
+  --mm-fg:           var(--vscode-editor-foreground,               #cccccc);
+  --mm-statusbar-bg: var(--vscode-statusBar-background,            #007acc);
+  --mm-statusbar-fg: var(--vscode-statusBar-foreground,            #ffffff);
+}
+
+/* ─── Reset ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--mm-font);
+  font-size: var(--mm-fz);
+  line-height: var(--mm-lh);
+  background: var(--mm-editor-bg);
+  color: var(--mm-fg);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+button { font-family: inherit; font-size: inherit; cursor: pointer; }
+
+/* ─── App shell ──────────────────────────────────────────────── */
+#app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ─── Toolbar ────────────────────────────────────────────────── */
+#toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 10px;
+  background: var(--mm-toolbar-bg);
+  border-bottom: 1px solid var(--mm-sep);
+  flex-shrink: 0;
+  min-height: 38px;
+}
+
+.tb-group { display: flex; align-items: center; gap: 6px; }
+.tb-center { flex: 1; justify-content: center; }
+
+.tb-btn {
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: var(--vscode-button-secondaryBackground, #3a3a3a);
+  color: var(--vscode-button-secondaryForeground, #ccc);
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+.tb-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #505050); }
+
+.tb-apply {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: transparent;
+}
+.tb-apply:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.tb-apply:disabled { opacity: 0.5; cursor: default; }
+
+.tb-abort {
+  background: rgba(120, 20, 20, 0.7);
+  color: #ffaaaa;
+  border-color: rgba(200, 40, 40, 0.5);
+}
+.tb-abort:hover { background: rgba(150, 30, 30, 0.85); }
+
+.tb-counter {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #999);
+  white-space: nowrap;
+  min-width: 140px;
+  text-align: center;
+}
+
+#progress-wrap {
+  width: 100px;
+  height: 5px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+#progress-fill {
+  height: 100%;
+  background: var(--vscode-button-background, #0e639c);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+#progress-label { font-size: 11px; color: var(--vscode-descriptionForeground, #888); }
+
+/* ─── Panel headers ─────────────────────────────────────────── */
+#panel-headers {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--mm-sep);
+}
+
+.ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  border-right: 1px solid var(--mm-sep);
+  background: var(--mm-panel-hdr-bg);
+}
+.ph:last-child { border-right: none; }
+
+.ph-left  { color: var(--mm-yours-text);   background: rgba(57,153,57,.07); }
+.ph-right { color: var(--mm-theirs-text);  background: rgba(42,100,200,.07); }
+.ph-center { color: var(--mm-fg); }
+
+.ph-arrow { opacity: 0.5; font-size: 9px; }
+
+/* ─── Editor area ────────────────────────────────────────────── */
+#editor-wrap {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+/* ─── Merge table ────────────────────────────────────────────── */
+#merge-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.col-gutter { width: 44px; }
+.col-pane   { width: calc((100% - 132px) / 3); }
+
+/* Gutter cells */
+td.gutter {
+  width: 44px;
+  text-align: right;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--mm-gutter-fg);
+  background: var(--mm-gutter-bg);
+  user-select: none;
+  vertical-align: top;
+  white-space: nowrap;
+  border-right: 1px solid var(--mm-sep);
+}
+
+/* Content cells */
+td.pane {
+  padding: 0 8px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+  font-family: var(--mm-font);
+  font-size: var(--mm-fz);
+  line-height: var(--mm-lh);
+}
+
+td.pane-left   { border-right: 2px solid var(--mm-sep); }
+td.pane-center { border-right: 2px solid var(--mm-sep); }
+
+/* ─── Normal rows ────────────────────────────────────────────── */
+tr.row-normal:hover td.pane {
+  background: rgba(255,255,255,0.03);
+}
+
+/* ─── Conflict: action bar row ───────────────────────────────── */
+tr.row-actions td {
+  border-top: 2px solid var(--mm-conflict-border);
+  padding: 0;
+  vertical-align: middle;
+}
+tr.row-actions.resolved td {
+  border-top: 2px solid var(--mm-resolved-border);
+}
+
+.action-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px;
+  min-height: 30px;
+}
+
+.action-bar.yours-bar  { background: var(--mm-yours-bg); }
+.action-bar.theirs-bar { background: var(--mm-theirs-bg); }
+.action-bar.center-bar { background: var(--mm-conflict-bg); flex-wrap: wrap; row-gap: 3px; }
+.action-bar.resolved-bar { background: var(--mm-resolved-bg); }
+
+.conflict-label {
+  font-size: 10px;
+  font-family: var(--mm-font);
+  opacity: 0.75;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conflict-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mm-conflict-text);
+  margin-right: 6px;
+}
+.resolved-num { color: var(--mm-resolved-text); }
+
+/* Inline arrow buttons (left/right panels) */
+.btn-arrow {
+  padding: 1px 7px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  white-space: nowrap;
+  transition: opacity 0.12s, background 0.12s;
+}
+.btn-arrow:hover { opacity: 1; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+
+/* Action buttons (center panel) */
+.act-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.act-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: filter 0.12s;
+}
+.act-btn:hover { filter: brightness(1.25); }
+
+.btn-yours  { background: rgba(57,153,57,.45);   color: #b8ffb8; border-color: rgba(80,200,80,.5); }
+.btn-theirs { background: rgba(42,100,200,.45);  color: #b0ccff; border-color: rgba(80,140,255,.5); }
+.btn-both   { background: rgba(120,60,200,.40);  color: #d0b8ff; border-color: rgba(150,90,255,.5); }
+.btn-ignore { background: rgba(90,90,90,.40);    color: #bbbbbb; border-color: rgba(130,130,130,.5); }
+.btn-undo   { background: rgba(160,80,10,.45);   color: #ffd0a0; border-color: rgba(220,120,30,.5); }
+
+/* ─── Conflict: content rows ─────────────────────────────────── */
+tr.row-conflict td.pane { vertical-align: top; }
+
+td.yours-line  { background: var(--mm-yours-bg); }
+td.theirs-line { background: var(--mm-theirs-bg); }
+td.conflict-unresolved { background: var(--mm-conflict-bg); }
+td.conflict-padding    { background: rgba(255,255,255,0.02); }
+
+/* Active conflict highlight */
+tr.row-actions.active td,
+tr.row-conflict.active td.yours-line  { background: var(--mm-yours-bg-hi); }
+tr.row-conflict.active td.theirs-line { background: var(--mm-theirs-bg-hi); }
+tr.row-conflict.active td.conflict-unresolved { background: rgba(200,100,10,.28); }
+tr.row-actions.active td { border-top-color: #ff8800; }
+
+/* Resolved rows */
+td.resolved-line { background: var(--mm-resolved-bg); color: #a0dba0; }
+td.resolved-yours-dim  { background: rgba(57,153,57,.08); opacity: 0.55; }
+td.resolved-theirs-dim { background: rgba(42,100,200,.08); opacity: 0.55; }
+td.ignored-cell { color: #777; font-style: italic; }
+
+/* Diff tokens inside center pane */
+.diff-del { background: rgba(200,50,50,.35); color: #ff9999; }
+.diff-add { background: rgba(50,180,50,.35); color: #99ff99; }
+
+/* ─── Status bar ─────────────────────────────────────────────── */
+#status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 10px;
+  background: var(--mm-statusbar-bg);
+  color: var(--mm-statusbar-fg);
+  font-size: 11px;
+  flex-shrink: 0;
+  min-height: 21px;
+}
+.status-done  { color: #a0ffa0; font-weight: 600; }
+#status-file  { opacity: 0.7; font-size: 10px; }
+
+/* ─── Scrollbars ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(121,121,121,0.35);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(121,121,121,0.65); }
