@@ -16,11 +16,13 @@ export interface ParseResult {
   endsWithNewline: boolean;
 }
 
-export type ResolutionType = 'unresolved' | 'yours' | 'theirs' | 'both' | 'ignored' | 'custom';
+export type ResolutionType = 'unresolved' | 'yours' | 'theirs' | 'both' | 'ignored' | 'custom' | 'line-selection';
 
 export interface Resolution {
   type: ResolutionType;
   customLines?: string[];
+  yoursSelected?: boolean[];   // per-line flags, only for line-selection
+  theirsSelected?: boolean[];  // per-line flags, only for line-selection
 }
 
 const YOURS_RE = /^<{7} ?(.*)$/;
@@ -122,6 +124,14 @@ export function buildMergedContent(
         break;
       case 'custom':
         if (resolution.customLines) out.push(...resolution.customLines);
+        break;
+      case 'line-selection':
+        conflict.yoursLines.forEach((l, i) => {
+          if (resolution.yoursSelected?.[i]) out.push(l);
+        });
+        conflict.theirsLines.forEach((l, i) => {
+          if (resolution.theirsSelected?.[i]) out.push(l);
+        });
         break;
       default:
         // Keep raw markers for unresolved

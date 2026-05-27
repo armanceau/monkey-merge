@@ -95,6 +95,11 @@ export async function openMergeEditor(
         panel.webview.postMessage({ type: 'stateUpdate', state: doc.getWebviewState() });
         break;
 
+      case 'toggleLine':
+        doc.resolveLines(msg.conflictIndex, msg.yoursSelected, msg.theirsSelected);
+        panel.webview.postMessage({ type: 'stateUpdate', state: doc.getWebviewState() });
+        break;
+
       case 'apply':
         await applyMerge(uri, doc);
         panel.dispose();
@@ -200,12 +205,12 @@ function buildHtml(webview: vscode.Webview, context: vscode.ExtensionContext): s
   <div id="editor-wrap">
     <table id="merge-table">
       <colgroup>
-        <col class="col-gutter"> <!-- left gutter -->
-        <col class="col-pane">   <!-- left content -->
-        <col class="col-gutter"> <!-- center gutter -->
-        <col class="col-pane">   <!-- center content -->
-        <col class="col-gutter"> <!-- right gutter -->
-        <col class="col-pane">   <!-- right content -->
+        <col class="col-g">   <!-- left gutter  (56px) -->
+        <col class="col-p">   <!-- left pane    (1fr)  -->
+        <col class="col-gc">  <!-- center gutter(22px) -->
+        <col class="col-p">   <!-- center pane  (1fr)  -->
+        <col class="col-g">   <!-- right gutter (56px) -->
+        <col class="col-p">   <!-- right pane   (1fr)  -->
       </colgroup>
       <tbody id="merge-body"></tbody>
     </table>

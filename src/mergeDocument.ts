@@ -26,6 +26,7 @@ export class MergeDocument {
   get totalConflicts(): number { return this._parseResult.conflicts.length; }
 
   get resolvedCount(): number {
+    // line-selection counts as resolved even when nothing selected (= intentional skip)
     return this._resolutions.filter(r => r.type !== 'unresolved').length;
   }
 
@@ -41,6 +42,12 @@ export class MergeDocument {
   resolve(index: number, type: ResolutionType, customLines?: string[]): void {
     if (index >= 0 && index < this._resolutions.length) {
       this._resolutions[index] = { type, customLines };
+    }
+  }
+
+  resolveLines(index: number, yoursSelected: boolean[], theirsSelected: boolean[]): void {
+    if (index >= 0 && index < this._resolutions.length) {
+      this._resolutions[index] = { type: 'line-selection', yoursSelected, theirsSelected };
     }
   }
 

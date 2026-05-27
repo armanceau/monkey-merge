@@ -1,329 +1,395 @@
-/* ═══════════════════════════════════════════════════════════════
-   Monkey Merge — IntelliJ-style Three-Way Merge Editor
-   Adaptive to VS Code theme via CSS custom properties
-   ═══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   Monkey Merge — IntelliJ Darcula–style three-way merge editor
+   ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── Palette (Darcula defaults, overridden by VS Code theme vars) ─────────── */
 :root {
-  /* Colour tokens — fall back to sensible dark-theme values */
-  --mm-yours-bg:         rgba(57, 153, 57,  0.18);
-  --mm-yours-bg-hi:      rgba(57, 153, 57,  0.30);
-  --mm-yours-border:     rgba(80, 200, 80,  0.55);
-  --mm-yours-text:       #6ed06e;
+  --ij-bg:          #2B2B2B;
+  --ij-gutter:      #313335;
+  --ij-toolbar:     #3C3F41;
+  --ij-border:      #4B4B4B;
+  --ij-fg:          #A9B7C6;
+  --ij-ln:          #606366;
+  --ij-sel:         #214283;
 
-  --mm-theirs-bg:        rgba(42, 100, 200, 0.20);
-  --mm-theirs-bg-hi:     rgba(42, 120, 230, 0.32);
-  --mm-theirs-border:    rgba(80, 140, 255, 0.55);
-  --mm-theirs-text:      #7ab0ff;
+  /* Yours / left (green) */
+  --ij-y-bg:        #294436;
+  --ij-y-bg-hi:     #336644;
+  --ij-y-bg-sel:    #1E6040;  /* line selected → in result */
+  --ij-y-gu:        #245A3A;
+  --ij-y-border:    #48996B;
+  --ij-y-btn:       #4A9960;
+  --ij-y-text:      #A5D6A7;
 
-  --mm-conflict-bg:      rgba(190, 100, 10, 0.16);
-  --mm-conflict-border:  rgba(255, 140, 30, 0.65);
-  --mm-conflict-text:    #ff9944;
+  /* Theirs / right (blue) */
+  --ij-t-bg:        #1C3A5C;
+  --ij-t-bg-hi:     #1F4A72;
+  --ij-t-bg-sel:    #1A4E7C;
+  --ij-t-gu:        #19406A;
+  --ij-t-border:    #3D74B8;
+  --ij-t-btn:       #4A8CBB;
+  --ij-t-text:      #90CAF9;
 
-  --mm-resolved-bg:      rgba(30, 110, 30,  0.14);
-  --mm-resolved-border:  rgba(60, 180, 60,  0.40);
-  --mm-resolved-text:    #7fd97f;
+  /* Result / center */
+  --ij-r-bg-y:      #1E4A30;  /* result line from yours */
+  --ij-r-bg-t:      #1A3F6A;  /* result line from theirs */
+  --ij-r-gu:        #2A2A2A;
 
-  --mm-font:     var(--vscode-editor-font-family,   'Consolas', 'Courier New', monospace);
-  --mm-fz:       var(--vscode-editor-font-size,     13px);
-  --mm-lh:       1.45;
+  /* Conflict header */
+  --ij-ch-bg:       #3C3F41;
+  --ij-ch-border:   #6A6A6A;
 
-  --mm-gutter-bg:    var(--vscode-editorGutter-background,         #1e1e1e);
-  --mm-gutter-fg:    var(--vscode-editorLineNumber-foreground,      #5a5a5a);
-  --mm-sep:          var(--vscode-editorGroup-border,               #3c3c3c);
-  --mm-toolbar-bg:   var(--vscode-editorGroupHeader-tabsBackground, #252526);
-  --mm-panel-hdr-bg: var(--vscode-tab-inactiveBackground,          #2d2d30);
-  --mm-editor-bg:    var(--vscode-editor-background,               #1e1e1e);
-  --mm-fg:           var(--vscode-editor-foreground,               #cccccc);
-  --mm-statusbar-bg: var(--vscode-statusBar-background,            #007acc);
-  --mm-statusbar-fg: var(--vscode-statusBar-foreground,            #ffffff);
+  /* Active conflict: brighter edges */
+  --ij-active-y:    #3D7A52;
+  --ij-active-t:    #2A5C8A;
+
+  /* Fonts */
+  --ij-font:   var(--vscode-editor-font-family,  'JetBrains Mono', 'Consolas', monospace);
+  --ij-fz:     var(--vscode-editor-font-size,     13px);
+  --ij-lh:     1.45;
 }
 
-/* ─── Reset ──────────────────────────────────────────────────── */
+/* ── Reset ────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: var(--mm-font);
-  font-size: var(--mm-fz);
-  line-height: var(--mm-lh);
-  background: var(--mm-editor-bg);
-  color: var(--mm-fg);
+  font-family: var(--ij-font);
+  font-size:   var(--ij-fz);
+  line-height: var(--ij-lh);
+  background:  var(--vscode-editor-background, var(--ij-bg));
+  color:       var(--vscode-editor-foreground, var(--ij-fg));
   height: 100vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-button { font-family: inherit; font-size: inherit; cursor: pointer; }
+button { font-family: inherit; font-size: inherit; cursor: pointer; outline: none; }
+button:focus-visible { outline: 1px solid var(--ij-t-btn); }
 
-/* ─── App shell ──────────────────────────────────────────────── */
+/* ── App ──────────────────────────────────────────────────────────────────── */
 #app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
-/* ─── Toolbar ────────────────────────────────────────────────── */
+/* ── Toolbar ──────────────────────────────────────────────────────────────── */
 #toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   padding: 5px 10px;
-  background: var(--mm-toolbar-bg);
-  border-bottom: 1px solid var(--mm-sep);
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--ij-toolbar));
+  border-bottom: 1px solid var(--ij-border);
   flex-shrink: 0;
-  min-height: 38px;
+  min-height: 36px;
 }
 
-.tb-group { display: flex; align-items: center; gap: 6px; }
+.tb-group { display: flex; align-items: center; gap: 5px; }
 .tb-center { flex: 1; justify-content: center; }
 
 .tb-btn {
   padding: 3px 10px;
   border-radius: 3px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: var(--vscode-button-secondaryBackground, #3a3a3a);
-  color: var(--vscode-button-secondaryForeground, #ccc);
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.06);
+  color: var(--ij-fg);
   font-size: 12px;
   white-space: nowrap;
-  transition: background 0.12s;
+  transition: background 0.1s;
 }
-.tb-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #505050); }
+.tb-btn:hover  { background: rgba(255,255,255,0.12); }
 
 .tb-apply {
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
-  border-color: transparent;
+  background: #214283;
+  color: #A9B7C6;
+  border-color: #2D5A9A;
 }
-.tb-apply:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
-.tb-apply:disabled { opacity: 0.5; cursor: default; }
+.tb-apply:hover { background: #2A549A; }
 
 .tb-abort {
-  background: rgba(120, 20, 20, 0.7);
-  color: #ffaaaa;
-  border-color: rgba(200, 40, 40, 0.5);
+  background: rgba(120,30,30,0.6);
+  color: #FF8A80;
+  border-color: rgba(180,50,50,0.5);
 }
-.tb-abort:hover { background: rgba(150, 30, 30, 0.85); }
+.tb-abort:hover { background: rgba(150,40,40,0.8); }
 
 .tb-counter {
   font-size: 12px;
-  color: var(--vscode-descriptionForeground, #999);
+  color: var(--ij-ln);
   white-space: nowrap;
-  min-width: 140px;
+  min-width: 160px;
   text-align: center;
 }
 
 #progress-wrap {
-  width: 100px;
-  height: 5px;
-  background: rgba(255,255,255,0.1);
-  border-radius: 3px;
-  overflow: hidden;
+  width: 80px; height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px; overflow: hidden;
 }
 #progress-fill {
-  height: 100%;
-  background: var(--vscode-button-background, #0e639c);
-  border-radius: 3px;
-  width: 0%;
-  transition: width 0.3s ease;
+  height: 100%; background: #214283;
+  border-radius: 2px; width: 0%;
+  transition: width 0.25s ease;
 }
-#progress-label { font-size: 11px; color: var(--vscode-descriptionForeground, #888); }
+#progress-label { font-size: 11px; color: var(--ij-ln); }
 
-/* ─── Panel headers ─────────────────────────────────────────── */
+/* ── Panel headers ────────────────────────────────────────────────────────── */
 #panel-headers {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--mm-sep);
+  border-bottom: 1px solid var(--ij-border);
 }
 
 .ph {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 5px 10px;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  border-right: 1px solid var(--mm-sep);
-  background: var(--mm-panel-hdr-bg);
+  border-right: 1px solid var(--ij-border);
+  background: var(--vscode-tab-inactiveBackground, var(--ij-toolbar));
 }
 .ph:last-child { border-right: none; }
 
-.ph-left  { color: var(--mm-yours-text);   background: rgba(57,153,57,.07); }
-.ph-right { color: var(--mm-theirs-text);  background: rgba(42,100,200,.07); }
-.ph-center { color: var(--mm-fg); }
+.ph-left  { color: var(--ij-y-text); background: rgba(41, 68, 54, 0.5); }
+.ph-right { color: var(--ij-t-text); background: rgba(28, 58, 92, 0.5); }
+.ph-center { color: var(--ij-fn); }
 
-.ph-arrow { opacity: 0.5; font-size: 9px; }
+.ph-arrow { opacity: 0.4; font-size: 9px; }
 
-/* ─── Editor area ────────────────────────────────────────────── */
-#editor-wrap {
-  flex: 1;
-  overflow: auto;
-  position: relative;
-}
+/* ── Editor area ──────────────────────────────────────────────────────────── */
+#editor-wrap { flex: 1; overflow: auto; position: relative; }
 
-/* ─── Merge table ────────────────────────────────────────────── */
+/* ── Merge table ──────────────────────────────────────────────────────────── */
 #merge-table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-.col-gutter { width: 44px; }
-.col-pane   { width: calc((100% - 132px) / 3); }
+/* Column widths */
+#merge-table colgroup .col-g  { width: 56px; }   /* gutters */
+#merge-table colgroup .col-gc { width: 22px; }   /* center gutter (× button) */
+#merge-table colgroup .col-p  { width: calc((100% - 134px) / 3); } /* panes */
 
-/* Gutter cells */
-td.gutter {
-  width: 44px;
-  text-align: right;
-  padding: 0 6px;
-  font-size: 11px;
-  color: var(--mm-gutter-fg);
-  background: var(--mm-gutter-bg);
-  user-select: none;
+/* ── Gutter cells ──────────────────────────────────────────────────────────  */
+td.gu {
+  background: var(--vscode-editorGutter-background, var(--ij-gutter));
+  width: 56px;
+  padding: 0;
   vertical-align: top;
-  white-space: nowrap;
-  border-right: 1px solid var(--mm-sep);
+  border-right: 1px solid var(--ij-border);
 }
 
-/* Content cells */
-td.pane {
+td.gc {
+  background: var(--ij-r-gu);
+  width: 22px;
+  padding: 0;
+  text-align: center;
+  vertical-align: middle;
+  border-right: 1px solid var(--ij-border);
+}
+
+/* gutter inner flex container */
+.gi {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 0 3px;
+  height: 100%;
+  min-height: calc(var(--ij-fz) * var(--ij-lh));
+}
+.gi-r { flex-direction: row-reverse; justify-content: flex-end; }
+
+/* Line numbers */
+.ln {
+  font-size: 11px;
+  color: var(--ij-ln);
+  user-select: none;
+  min-width: 24px;
+  text-align: right;
+}
+
+/* ── Gutter colours for conflict regions ────────────────────────────────── */
+td.gu-yours     { background: var(--ij-y-gu); }
+td.gu-yours-sel { background: var(--ij-y-bg-sel); }
+td.gu-theirs    { background: var(--ij-t-gu); }
+td.gu-theirs-sel{ background: var(--ij-t-bg-sel); }
+td.gu-pad       { background: var(--ij-gutter); }
+
+/* Center gutter (× remove button column) */
+td.gc { border-left: 1px solid var(--ij-border); }
+
+/* ── Line-toggle buttons (▷ / ◁) ─────────────────────────────────────────── */
+.lb {
+  width: 16px; height: 16px;
+  border: none; border-radius: 2px;
+  background: transparent;
+  color: #4A5568;
+  font-size: 10px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+.lb:hover      { background: rgba(255,255,255,0.12); color: var(--ij-y-text); }
+.lb.lb-on      { color: var(--ij-y-btn); }
+.lb.lb-on:hover{ color: #6EC88A; }
+
+.lb-r       { color: #4A5568; }
+.lb-r:hover { background: rgba(255,255,255,0.12); color: var(--ij-t-text); }
+.lb-r.lb-r-on      { color: var(--ij-t-btn); }
+.lb-r.lb-r-on:hover{ color: #7AB8D8; }
+
+/* Remove-from-result button (×) */
+.xb {
+  width: 16px; height: 16px;
+  border: none; border-radius: 2px;
+  background: transparent;
+  color: #6B4444;
+  font-size: 12px; line-height: 1;
+  padding: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.xb:hover { background: rgba(255,80,80,0.15); color: #FF6B68; }
+
+/* ── Content pane cells ───────────────────────────────────────────────────── */
+td.pa {
   padding: 0 8px;
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: top;
-  font-family: var(--mm-font);
-  font-size: var(--mm-fz);
-  line-height: var(--mm-lh);
+  font-family: var(--ij-font);
+  font-size: var(--ij-fz);
+  line-height: var(--ij-lh);
 }
+td.pl { border-right: 2px solid var(--ij-border); }
+td.pc { border-right: 2px solid var(--ij-border); background: var(--ij-bg); }
+td.pr { }
 
-td.pane-left   { border-right: 2px solid var(--mm-sep); }
-td.pane-center { border-right: 2px solid var(--mm-sep); }
+/* ── Normal rows ──────────────────────────────────────────────────────────── */
+tr.row-normal:hover td.pa { background: rgba(255,255,255,0.025); }
 
-/* ─── Normal rows ────────────────────────────────────────────── */
-tr.row-normal:hover td.pane {
-  background: rgba(255,255,255,0.03);
-}
+/* ── Conflict: action header row ─────────────────────────────────────────── */
+tr.row-action td { border-top: 2px solid var(--ij-ch-border); padding: 0; }
 
-/* ─── Conflict: action bar row ───────────────────────────────── */
-tr.row-actions td {
-  border-top: 2px solid var(--mm-conflict-border);
+/* Active conflict: brighter top border */
+tr.row-action.active-conflict td              { border-top-color: var(--ij-y-border) !important; }
+tr.row-action.active-conflict td.gu-theirs,
+tr.row-action.active-conflict td.action-gu:last-of-type { border-top-color: var(--ij-t-border) !important; }
+
+/* Gutter cells in action row */
+td.action-gu {
+  border-top-color: inherit;
   padding: 0;
-  vertical-align: middle;
+  min-height: 28px;
 }
-tr.row-actions.resolved td {
-  border-top: 2px solid var(--mm-resolved-border);
-}
+td.yours-gu  { background: var(--ij-y-gu); border-top-color: var(--ij-y-border); }
+td.theirs-gu { background: var(--ij-t-gu); border-top-color: var(--ij-t-border); }
 
-.action-bar {
+/* Pane cells in action row */
+td.action-pl { border-top-color: var(--ij-y-border); border-right-color: var(--ij-border); }
+td.action-pr { border-top-color: var(--ij-t-border); }
+td.action-pc { border-top-color: var(--ij-ch-border); }
+
+/* Action bar inner */
+.abar {
   display: flex;
   align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  min-height: 28px;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 8px;
-  min-height: 30px;
+}
+.yours-abar  { background: var(--ij-y-bg); border-bottom: 1px solid var(--ij-y-border); }
+.theirs-abar { background: var(--ij-t-bg); border-bottom: 1px solid var(--ij-t-border); }
+.center-abar {
+  background: var(--ij-ch-bg);
+  border-bottom: 1px solid var(--ij-ch-border);
+  justify-content: space-between;
 }
 
-.action-bar.yours-bar  { background: var(--mm-yours-bg); }
-.action-bar.theirs-bar { background: var(--mm-theirs-bg); }
-.action-bar.center-bar { background: var(--mm-conflict-bg); flex-wrap: wrap; row-gap: 3px; }
-.action-bar.resolved-bar { background: var(--mm-resolved-bg); }
-
-.conflict-label {
-  font-size: 10px;
-  font-family: var(--mm-font);
-  opacity: 0.75;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Conflict number label */
+.cnum {
+  font-size: 11px;
+  font-weight: 600;
+  color: #808080;
   white-space: nowrap;
 }
-.conflict-num {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--mm-conflict-text);
-  margin-right: 6px;
-}
-.resolved-num { color: var(--mm-resolved-text); }
+.resolved-cnum { color: var(--ij-y-btn); }
 
-/* Inline arrow buttons (left/right panels) */
-.btn-arrow {
+/* Block-level buttons (Yours / Theirs / Both / Skip / Undo) */
+.bbtns { display: flex; gap: 3px; flex-wrap: wrap; }
+
+.abtn {
   padding: 1px 7px;
   font-size: 11px;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  background: transparent;
-  color: inherit;
-  opacity: 0.7;
-  white-space: nowrap;
-  transition: opacity 0.12s, background 0.12s;
-}
-.btn-arrow:hover { opacity: 1; background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
-
-/* Action buttons (center panel) */
-.act-btns { display: flex; gap: 4px; flex-wrap: wrap; }
-
-.act-btn {
-  padding: 2px 8px;
-  font-size: 11px;
   border-radius: 2px;
   border: 1px solid transparent;
   white-space: nowrap;
-  transition: filter 0.12s;
+  transition: filter 0.1s;
 }
-.act-btn:hover { filter: brightness(1.25); }
+.abtn:hover { filter: brightness(1.3); }
 
-.btn-yours  { background: rgba(57,153,57,.45);   color: #b8ffb8; border-color: rgba(80,200,80,.5); }
-.btn-theirs { background: rgba(42,100,200,.45);  color: #b0ccff; border-color: rgba(80,140,255,.5); }
-.btn-both   { background: rgba(120,60,200,.40);  color: #d0b8ff; border-color: rgba(150,90,255,.5); }
-.btn-ignore { background: rgba(90,90,90,.40);    color: #bbbbbb; border-color: rgba(130,130,130,.5); }
-.btn-undo   { background: rgba(160,80,10,.45);   color: #ffd0a0; border-color: rgba(220,120,30,.5); }
+.btn-y   { background: rgba(41,100,70,.55);   color: var(--ij-y-text);  border-color: var(--ij-y-border); }
+.btn-t   { background: rgba(28,80,160,.55);   color: var(--ij-t-text);  border-color: var(--ij-t-border); }
+.btn-b   { background: rgba(100,60,180,.40);  color: #CBA7FF;            border-color: rgba(130,80,220,.5); }
+.btn-sk  { background: rgba(80,80,80,.35);    color: #888;               border-color: rgba(120,120,120,.4); }
+.btn-undo{ background: rgba(130,70,10,.45);   color: #FFBA74;            border-color: rgba(200,110,30,.5); }
 
-/* ─── Conflict: content rows ─────────────────────────────────── */
-tr.row-conflict td.pane { vertical-align: top; }
+/* ── Conflict content rows ────────────────────────────────────────────────── */
+tr.row-conflict td { vertical-align: top; }
 
-td.yours-line  { background: var(--mm-yours-bg); }
-td.theirs-line { background: var(--mm-theirs-bg); }
-td.conflict-unresolved { background: var(--mm-conflict-bg); }
-td.conflict-padding    { background: rgba(255,255,255,0.02); }
+/* Yours (left) panel line colors */
+td.yours-line { background: var(--ij-y-bg); }
+td.yours-sel  { background: var(--ij-y-bg-sel); }   /* line is in result */
 
-/* Active conflict highlight */
-tr.row-actions.active td,
-tr.row-conflict.active td.yours-line  { background: var(--mm-yours-bg-hi); }
-tr.row-conflict.active td.theirs-line { background: var(--mm-theirs-bg-hi); }
-tr.row-conflict.active td.conflict-unresolved { background: rgba(200,100,10,.28); }
-tr.row-actions.active td { border-top-color: #ff8800; }
+/* Theirs (right) panel line colors */
+td.theirs-line { background: var(--ij-t-bg); }
+td.theirs-sel  { background: var(--ij-t-bg-sel); }  /* line is in result */
 
-/* Resolved rows */
-td.resolved-line { background: var(--mm-resolved-bg); color: #a0dba0; }
-td.resolved-yours-dim  { background: rgba(57,153,57,.08); opacity: 0.55; }
-td.resolved-theirs-dim { background: rgba(42,100,200,.08); opacity: 0.55; }
-td.ignored-cell { color: #777; font-style: italic; }
+/* Padding cell (when one side has fewer lines) */
+td.cpad { background: rgba(255,255,255,0.012); }
 
-/* Diff tokens inside center pane */
-.diff-del { background: rgba(200,50,50,.35); color: #ff9999; }
-.diff-add { background: rgba(50,180,50,.35); color: #99ff99; }
+/* Result (center) line */
+td.result-line  { }
+td.result-yours  { background: var(--ij-r-bg-y); color: var(--ij-y-text); }
+td.result-theirs { background: var(--ij-r-bg-t); color: var(--ij-t-text); }
 
-/* ─── Status bar ─────────────────────────────────────────────── */
+/* ── Active conflict: brighter backgrounds ────────────────────────────────── */
+tr.row-conflict.active-conflict td.yours-line  { background: var(--ij-y-bg-hi); }
+tr.row-conflict.active-conflict td.yours-sel   { background: var(--ij-active-y); }
+tr.row-conflict.active-conflict td.theirs-line { background: var(--ij-t-bg-hi); }
+tr.row-conflict.active-conflict td.theirs-sel  { background: var(--ij-active-t); }
+
+tr.row-conflict.active-conflict td.gu-yours     { background: #336655; }
+tr.row-conflict.active-conflict td.gu-yours-sel { background: #247A55; }
+tr.row-conflict.active-conflict td.gu-theirs    { background: #234B80; }
+tr.row-conflict.active-conflict td.gu-theirs-sel{ background: #1E5A92; }
+
+/* ── Status bar ───────────────────────────────────────────────────────────── */
 #status-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 2px 10px;
-  background: var(--mm-statusbar-bg);
-  color: var(--mm-statusbar-fg);
+  background: var(--vscode-statusBar-background, #007acc);
+  color: var(--vscode-statusBar-foreground, #fff);
   font-size: 11px;
   flex-shrink: 0;
-  min-height: 21px;
+  min-height: 20px;
 }
-.status-done  { color: #a0ffa0; font-weight: 600; }
-#status-file  { opacity: 0.7; font-size: 10px; }
+.status-done { color: #A5D6A7; font-weight: 600; }
+#status-file { opacity: 0.65; font-size: 10px; }
 
-/* ─── Scrollbars ─────────────────────────────────────────────── */
+/* ── Scrollbars ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: rgba(121,121,121,0.35);
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover { background: rgba(121,121,121,0.65); }
+::-webkit-scrollbar-thumb { background: rgba(121,121,121,0.30); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(121,121,121,0.60); }
