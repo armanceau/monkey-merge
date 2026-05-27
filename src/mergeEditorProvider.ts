@@ -8,6 +8,10 @@ const openPanels = new Map<string, { panel: vscode.WebviewPanel; doc: MergeDocum
 // The most recently focused merge editor panel (for keyboard commands)
 let activePanelKey: string | undefined;
 
+export function isOpenForUri(uri: vscode.Uri): boolean {
+  return openPanels.has(uri.toString());
+}
+
 export async function openMergeEditor(
   uri: vscode.Uri,
   context: vscode.ExtensionContext
@@ -15,7 +19,7 @@ export async function openMergeEditor(
   const key = uri.toString();
 
   if (openPanels.has(key)) {
-    openPanels.get(key)!.panel.reveal(vscode.ViewColumn.One);
+    openPanels.get(key)!.panel.reveal(vscode.ViewColumn.Beside, true);
     return;
   }
 
@@ -40,7 +44,7 @@ export async function openMergeEditor(
   const panel = vscode.window.createWebviewPanel(
     'monkeyMergeEditor',
     `⚡ Merge: ${fileName}`,
-    vscode.ViewColumn.One,
+    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
     {
       enableScripts: true,
       retainContextWhenHidden: true,

@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import { hasConflictMarkers } from './conflictParser';
-import { openMergeEditor, sendCommandToActivePanel } from './mergeEditorProvider';
+import { openMergeEditor, sendCommandToActivePanel, isOpenForUri } from './mergeEditorProvider';
 
 export function activate(context: vscode.ExtensionContext): void {
   const cfg = () => vscode.workspace.getConfiguration('monkeyMerge');
 
-  // ── Commands ────────────────────────────────────────────────────────────────
+  // ── Commands ─────────────────────────────────────────────────────────────
 
   context.subscriptions.push(
     vscode.commands.registerCommand('monkeyMerge.openMergeEditor', async (uri?: vscode.Uri) => {
@@ -29,37 +29,38 @@ export function activate(context: vscode.ExtensionContext): void {
       () => sendCommandToActivePanel('previousConflict')),
   );
 
-  // ── Auto-detect conflicts on file open ──────────────────────────────────────
+  // ── Auto-open when switching to a file that has conflicts ─────────────────
+  // No prompt: open immediately (IntelliJ behaviour), beside the current file.
 
+  async function maybeAutoOpen(doc: vscode.TextDocument): Promise<void> {
+    if (!cfg().get<boolean>('autoDetect', true)) return;
+    if (doc.uri.scheme !== 'file') return;
+    if (isOpenForUri(doc.uri)) return;       // already open
+    if (!hasConflictMarkers(doc.getText())) return;
+    await openMergeEditor(doc.uri, context);
+  }
+
+  // Fires when the user focuses a different editor tab
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument(async doc => {
-      if (!cfg().get<boolean>('autoDetect', true)) return;
-      if (doc.uri.scheme !== 'file') return;
-      if (!hasConflictMarkers(doc.getText())) return;
-
-      const choice = await vscode.window.showInformationMessage(
-        `"${doc.fileName.split(/[\\/]/).pop()}" has merge conflicts.`,
-        'Open Merge Editor',
-        'Dismiss'
-      );
-      if (choice === 'Open Merge Editor') {
-        await openMergeEditor(doc.uri, context);
-      }
+    vscode.window.onDidChangeActiveTextEditor(async editor => {
+      if (!editor) return;
+      await maybeAutoOpen(editor.document);
     })
   );
 
-  // Prompt for any already-open conflicted file at activation
-  for (const doc of vscode.workspace.textDocuments) {
-    if (doc.uri.scheme === 'file' && hasConflictMarkers(doc.getText())) {
-      vscode.window.showInformationMessage(
-        `"${doc.fileName.split(/[\\/]/).pop()}" has merge conflicts.`,
-        'Open Merge Editor',
-        'Dismiss'
-      ).then(choice => {
-        if (choice === 'Open Merge Editor') openMergeEditor(doc.uri, context);
-      });
-      break; // one prompt is enough on startup
-    }
+  // Fires when a document is first loaded (e.g. opened via git status click)
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(async doc => {
+      // Give VS Code a tick so the editor is visible before we open beside it
+      await new Promise(r => setTimeout(r, 100));
+      await maybeAutoOpen(doc);
+    })
+  );
+
+  // Check the currently active editor at activation time
+  const active = vscode.window.activeTextEditor;
+  if (active) {
+    maybeAutoOpen(active.document);
   }
 }
 
