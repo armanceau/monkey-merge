@@ -1,11 +1,13 @@
 export interface ConflictBlock {
   index: number;
   startLine: number;      // 0-indexed line of <<<<<<<
+  baseLine?: number;      // 0-indexed line of ||||||| (3-way only)
   separatorLine: number;  // 0-indexed line of =======
   endLine: number;        // 0-indexed line of >>>>>>>
   yoursBranch: string;    // label from <<<<<<< LABEL
   theirsBranch: string;   // label from >>>>>>> LABEL
   yoursLines: string[];
+  baseLines?: string[];   // lines between ||||||| and ======= (3-way only)
   theirsLines: string[];
 }
 
@@ -16,18 +18,21 @@ export interface ParseResult {
   endsWithNewline: boolean;
 }
 
-export type ResolutionType = 'unresolved' | 'yours' | 'theirs' | 'both' | 'ignored' | 'custom' | 'line-selection';
+export type ResolutionType = 'unresolved' | 'yours' | 'theirs' | 'both' | 'both-reversed' | 'ignored' | 'custom' | 'line-selection';
 
 export interface Resolution {
   type: ResolutionType;
   customLines?: string[];
   yoursSelected?: boolean[];   // per-line flags, only for line-selection
   theirsSelected?: boolean[];  // per-line flags, only for line-selection
+  yoursBelow?: boolean[];      // per-line: append at end of result instead of in-position
+  theirsBelow?: boolean[];     // per-line: append at end of result instead of in-position
 }
 
-const YOURS_RE = /^<{7} ?(.*)$/;
+const YOURS_RE     = /^<{7} ?(.*)$/;
+const BASE_RE      = /^\|{7} ?(.*)$/;
 const SEPARATOR_RE = /^={7}\s*$/;
-const THEIRS_RE = /^>{7} ?(.*)$/;
+const THEIRS_RE    = /^>{7} ?(.*)$/;
 
 export function parseConflicts(content: string): ParseResult {
   const endsWithNewline = content.endsWith('\n');
@@ -48,11 +53,25 @@ export function parseConflicts(content: string): ParseResult {
     const yoursLines: string[] = [];
     i++;
 
-    while (i < lines.length && !SEPARATOR_RE.test(lines[i])) {
-      // Bail on nested/mismatched markers to avoid runaway parsing
+    while (i < lines.length && !SEPARATOR_RE.test(lines[i]) && !BASE_RE.test(lines[i])) {
       if (YOURS_RE.test(lines[i]) || THEIRS_RE.test(lines[i])) { i++; break; }
       yoursLines.push(lines[i]);
       i++;
+    }
+
+    // Optional 3-way base section (||||||| ... =======)
+    let baseLine: number | undefined;
+    let baseLines: string[] | undefined;
+
+    if (i < lines.length && BASE_RE.test(lines[i])) {
+      baseLine = i;
+      baseLines = [];
+      i++;
+      while (i < lines.length && !SEPARATOR_RE.test(lines[i])) {
+        if (YOURS_RE.test(lines[i]) || THEIRS_RE.test(lines[i])) { i++; break; }
+        baseLines.push(lines[i]);
+        i++;
+      }
     }
 
     if (i >= lines.length || !SEPARATOR_RE.test(lines[i])) continue;
@@ -76,11 +95,13 @@ export function parseConflicts(content: string): ParseResult {
     conflicts.push({
       index: conflictIndex++,
       startLine,
+      baseLine,
       separatorLine,
       endLine,
       yoursBranch,
       theirsBranch,
       yoursLines,
+      baseLines,
       theirsLines,
     });
 
@@ -92,6 +113,24 @@ export function parseConflicts(content: string): ParseResult {
 
 export function hasConflictMarkers(content: string): boolean {
   return /^<{7} /m.test(content);
+}
+
+export function extractBranchNames(content: string): { left: string; right: string } {
+  const yoursMatch  = content.match(/^<{7} (.+)$/m);
+  const theirsMatch = content.match(/^>{7} (.+)$/m);
+  return {
+    left:  yoursMatch?.[1].trim()  ?? 'HEAD',
+    right: theirsMatch?.[1].trim() ?? 'THEIRS',
+  };
+}
+
+export function serializeResult(
+  lines: string[],
+  conflicts: ConflictBlock[],
+  resolutions: Resolution[],
+  endsWithNewline: boolean
+): string {
+  return buildMergedContent(lines, conflicts, resolutions, endsWithNewline);
 }
 
 export function buildMergedContent(
@@ -120,19 +159,33 @@ export function buildMergedContent(
       case 'both':
         out.push(...conflict.yoursLines, ...conflict.theirsLines);
         break;
+      case 'both-reversed':
+        out.push(...conflict.theirsLines, ...conflict.yoursLines);
+        break;
       case 'ignored':
         break;
       case 'custom':
         if (resolution.customLines) out.push(...resolution.customLines);
         break;
-      case 'line-selection':
+      case 'line-selection': {
+        const yoursBelow  = resolution.yoursBelow  ?? [];
+        const theirsBelow = resolution.theirsBelow ?? [];
+        // Inline lines first (selected and NOT marked below)
         conflict.yoursLines.forEach((l, i) => {
-          if (resolution.yoursSelected?.[i]) out.push(l);
+          if (resolution.yoursSelected?.[i] && !yoursBelow[i]) out.push(l);
         });
         conflict.theirsLines.forEach((l, i) => {
-          if (resolution.theirsSelected?.[i]) out.push(l);
+          if (resolution.theirsSelected?.[i] && !theirsBelow[i]) out.push(l);
+        });
+        // Below lines appended after all inline content
+        conflict.yoursLines.forEach((l, i) => {
+          if (resolution.yoursSelected?.[i] && yoursBelow[i]) out.push(l);
+        });
+        conflict.theirsLines.forEach((l, i) => {
+          if (resolution.theirsSelected?.[i] && theirsBelow[i]) out.push(l);
         });
         break;
+      }
       default:
         // Keep raw markers for unresolved
         out.push(lines[conflict.startLine]);

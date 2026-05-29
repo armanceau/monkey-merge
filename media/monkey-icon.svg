@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none">
+  <!-- Left side (yours) arrow → center -->
+  <path d="M1 3.5 L4.5 8 L1 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Right side (theirs) arrow → center -->
+  <path d="M15 3.5 L11.5 8 L15 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Center result bar -->
+  <line x1="4.5" y1="8" x2="11.5" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <!-- Small dots on center bar -->
+  <circle cx="8" cy="8" r="1.2" fill="currentColor"/>
+</svg>

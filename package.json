@@ -10,11 +10,29 @@
   "activationEvents": ["onStartupFinished"],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "monkeyMergeContainer",
+          "title": "Monkey Merge",
+          "icon": "media/monkey-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "monkeyMergeContainer": [
+        {
+          "id": "monkeyMerge.panel",
+          "name": "Merge Conflicts"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "monkeyMerge.openMergeEditor",
         "title": "Open Merge Editor (IntelliJ Style)",
-        "category": "Monkey Merge"
+        "category": "Monkey Merge",
+        "icon": "$(git-merge)"
       },
       {
         "command": "monkeyMerge.acceptYours",
@@ -82,6 +100,13 @@
           "command": "monkeyMerge.openMergeEditor",
           "when": "resourceHasConflicts",
           "group": "1_modification"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "monkeyMerge.openMergeEditor",
+          "when": "view == monkeyMerge.panel",
+          "group": "navigation"
         }
       ]
     },

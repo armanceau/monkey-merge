@@ -45,9 +45,15 @@ export class MergeDocument {
     }
   }
 
-  resolveLines(index: number, yoursSelected: boolean[], theirsSelected: boolean[]): void {
+  resolveLines(
+    index: number,
+    yoursSelected: boolean[],
+    theirsSelected: boolean[],
+    yoursBelow?: boolean[],
+    theirsBelow?: boolean[],
+  ): void {
     if (index >= 0 && index < this._resolutions.length) {
-      this._resolutions[index] = { type: 'line-selection', yoursSelected, theirsSelected };
+      this._resolutions[index] = { type: 'line-selection', yoursSelected, theirsSelected, yoursBelow, theirsBelow };
     }
   }
 

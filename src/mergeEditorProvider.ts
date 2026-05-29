@@ -24,7 +24,12 @@ export async function openMergeEditor(
   }
 
   const rawBytes = await vscode.workspace.fs.readFile(uri);
-  const text = Buffer.from(rawBytes).toString('utf-8');
+  // Strip UTF-8 BOM if present, normalize CRLF → LF
+  const text = Buffer.from(rawBytes)
+    .toString('utf-8')
+    .replace(/^﻿/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
 
   if (!hasConflictMarkers(text)) {
     vscode.window.showInformationMessage('No git conflict markers found in this file.');
@@ -39,6 +44,13 @@ export async function openMergeEditor(
 
   const parseResult = parseConflicts(text);
   const doc = new MergeDocument(parseResult);
+
+  // Debug output visible in "Extension Host" output panel
+  console.log(`[MonkeyMerge] ${path.basename(uri.fsPath)}: ${parseResult.conflicts.length} conflict(s), ${parseResult.lines.length} lines`);
+  if (parseResult.conflicts.length === 0) {
+    const sample = text.split('\n').slice(0, 20).join(' | ');
+    console.log(`[MonkeyMerge] WARNING — 0 conflicts detected. First 20 lines: ${sample}`);
+  }
   const fileName = path.basename(uri.fsPath);
 
   const panel = vscode.window.createWebviewPanel(
@@ -100,7 +112,7 @@ export async function openMergeEditor(
         break;
 
       case 'toggleLine':
-        doc.resolveLines(msg.conflictIndex, msg.yoursSelected, msg.theirsSelected);
+        doc.resolveLines(msg.conflictIndex, msg.yoursSelected, msg.theirsSelected, msg.yoursBelow, msg.theirsBelow);
         panel.webview.postMessage({ type: 'stateUpdate', state: doc.getWebviewState() });
         break;
 
