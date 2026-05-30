@@ -95,11 +95,11 @@
 
   function dispatchAction(action, ci) {
     switch (action) {
-      case 'accept-left':  acceptLeft(ci);     break;
-      case 'accept-right': acceptRight(ci);    break;
-      case 'reject':       rejectConflict(ci); break;
+      case 'accept-left':  acceptLeft(ci);   break;
+      case 'accept-right': acceptRight(ci);  break;
+      case 'reject-left':  rejectLeft(ci);   break;
+      case 'reject-right': rejectRight(ci);  break;
     }
-    // setActive est déjà appelé dans applyResolution — pas de double appel
   }
 
   // ── Message handler ─────────────────────────────────────────
@@ -330,9 +330,31 @@
     applyResolution(ci);
   }
 
-  function rejectConflict(ci) {
-    localRes[ci] = { type: 'empty', lines: [] };
-    vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'ignored' });
+  // × gauche : si "both" → garde seulement le côté droit ; sinon vide tout
+  function rejectLeft(ci) {
+    const cur = localRes[ci];
+    if (cur && cur.type === 'both') {
+      const c = rawState.conflicts[ci];
+      localRes[ci] = { type: 'accepted-right', lines: [...c.theirsLines] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'theirs' });
+    } else {
+      localRes[ci] = { type: 'empty', lines: [] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'ignored' });
+    }
+    applyResolution(ci);
+  }
+
+  // × droit : si "both" → garde seulement le côté gauche ; sinon vide tout
+  function rejectRight(ci) {
+    const cur = localRes[ci];
+    if (cur && cur.type === 'both') {
+      const c = rawState.conflicts[ci];
+      localRes[ci] = { type: 'accepted-left', lines: [...c.yoursLines] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'yours' });
+    } else {
+      localRes[ci] = { type: 'empty', lines: [] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'ignored' });
+    }
     applyResolution(ci);
   }
 
@@ -421,22 +443,24 @@
       if (rL.bottom - gLRect.top < 0 || rL.top - gLRect.top > gLRect.height) return;
 
       // Left gutter: [×] then [»]
+      // Le × gauche supprime seulement la partie gauche (garde la droite si both)
       const grpL = document.createElement('div');
       grpL.className = 'gutter-actions';
       grpL.style.top = `${midL - 20}px`;
       grpL.innerHTML =
-        `<button class="g-btn g-btn-reject"      data-ci="${ci}" data-action="reject"       title="Reject">×</button>` +
-        `<button class="g-btn g-btn-accept-left" data-ci="${ci}" data-action="accept-left"  title="Accept Left">»</button>`;
+        `<button class="g-btn g-btn-reject"      data-ci="${ci}" data-action="reject-left"  title="Retirer gauche">×</button>` +
+        `<button class="g-btn g-btn-accept-left" data-ci="${ci}" data-action="accept-left"  title="Accepter gauche">»</button>`;
       gutterLeft.appendChild(grpL);
 
       // Right gutter: [«] then [×]
+      // Le × droit supprime seulement la partie droite (garde la gauche si both)
       if (rR.bottom - gRRect.top >= 0 && rR.top - gRRect.top <= gRRect.height) {
         const grpR = document.createElement('div');
         grpR.className = 'gutter-actions';
         grpR.style.top = `${midR - 20}px`;
         grpR.innerHTML =
-          `<button class="g-btn g-btn-accept-right" data-ci="${ci}" data-action="accept-right" title="Accept Right">«</button>` +
-          `<button class="g-btn g-btn-reject"        data-ci="${ci}" data-action="reject"        title="Reject">×</button>`;
+          `<button class="g-btn g-btn-accept-right" data-ci="${ci}" data-action="accept-right" title="Accepter droite">«</button>` +
+          `<button class="g-btn g-btn-reject"        data-ci="${ci}" data-action="reject-right" title="Retirer droite">×</button>`;
         gutterRight.appendChild(grpR);
       }
     });
