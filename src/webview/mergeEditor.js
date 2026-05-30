@@ -95,11 +95,11 @@
 
   function dispatchAction(action, ci) {
     switch (action) {
-      case 'accept-left':  acceptLeft(ci);  break;
-      case 'accept-right': acceptRight(ci); break;
+      case 'accept-left':  acceptLeft(ci);     break;
+      case 'accept-right': acceptRight(ci);    break;
       case 'reject':       rejectConflict(ci); break;
     }
-    setActive(ci);
+    // setActive est déjà appelé dans applyResolution — pas de double appel
   }
 
   // ── Message handler ─────────────────────────────────────────
@@ -112,18 +112,17 @@
       branchLeft.textContent  = (!yn || yn === 'HEAD') ? 'yours'  : yn;
       branchRight.textContent = (!tn || tn === 'HEAD') ? 'theirs' : tn;
       if (mergeBranch) mergeBranch.textContent = `▲ Merging ${yn || ''}`;
-      syncResFromState();
+      syncResFromState();   // une seule fois, à l'init
       buildSegments();
       renderAll();
       updateUI();
       setupScrollSync();
-      setupGutterDelegation();       // wired once, survives re-renders
+      setupGutterDelegation();
       requestAnimationFrame(() => scrollToConflict(0));
     } else if (msg.type === 'stateUpdate') {
+      // On met à jour rawState (pour Apply/save) mais on ne re-rend pas :
+      // les résolutions locales font autorité et ont déjà été appliquées.
       rawState = msg.state;
-      syncResFromState();
-      buildSegments();
-      renderAll();
       updateUI();
     } else if (msg.type === 'command') {
       if (msg.command === 'nextConflict')     navigate(+1);
