@@ -5,555 +5,553 @@
   // @ts-ignore
   const vscode = acquireVsCodeApi();
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  /** @type {any} */  let state = null;
-  let activeIdx = 0;
-  let filePath  = '';
+  // ── Constants ──────────────────────────────────────────────
+  const LINE_H = 20; // must match --line-height: 20px in CSS
 
-  // Client-side only: rejected marks (visual, don't affect output)
-  // { [ci]: { yours: boolean[], theirs: boolean[] } }
-  const rejectedLines = {};
+  // ── State ──────────────────────────────────────────────────
+  /** @type {any} */       let rawState = null;
+  /** @type {Array<any>}*/ let segments = [];
+  let activeConflictIdx = 0;
+  let isSyncing = false;
 
-  // ── DOM refs ───────────────────────────────────────────────────────────────
-  const mergeBody     = /** @type {HTMLElement} */ (document.getElementById('merge-body'));
-  const counter       = /** @type {HTMLElement} */ (document.getElementById('conflict-counter'));
-  const progressFill  = /** @type {HTMLElement} */ (document.getElementById('progress-fill'));
-  const progressLabel = /** @type {HTMLElement} */ (document.getElementById('progress-label'));
-  const statusMsg     = /** @type {HTMLElement} */ (document.getElementById('status-msg'));
-  const statusFile    = /** @type {HTMLElement} */ (document.getElementById('status-file'));
-  const lblYours      = /** @type {HTMLElement} */ (document.getElementById('lbl-yours'));
-  const lblTheirs     = /** @type {HTMLElement} */ (document.getElementById('lbl-theirs'));
-  const btnPrev       = /** @type {HTMLButtonElement} */ (document.getElementById('btn-prev'));
-  const btnNext       = /** @type {HTMLButtonElement} */ (document.getElementById('btn-next'));
-  const btnApply      = /** @type {HTMLButtonElement} */ (document.getElementById('btn-apply'));
-  const btnAbort      = /** @type {HTMLButtonElement} */ (document.getElementById('btn-abort'));
+  // Per-conflict resolution: { type:'empty'|'accepted-left'|'accepted-right'|'both'|'manual', lines:string[] }
+  /** @type {Record<number,{type:string,lines:string[]}>} */
+  const localRes = {};
 
-  // ── Toolbar ────────────────────────────────────────────────────────────────
-  btnPrev.addEventListener('click',  () => navigate(-1));
-  btnNext.addEventListener('click',  () => navigate(+1));
-  btnApply.addEventListener('click', () => vscode.postMessage({ type: 'apply' }));
-  btnAbort.addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
+  // ── DOM refs ───────────────────────────────────────────────
+  const panelLeft    = /** @type {HTMLElement} */ (document.getElementById('panel-left'));
+  const panelCenter  = /** @type {HTMLElement} */ (document.getElementById('panel-center'));
+  const panelRight   = /** @type {HTMLElement} */ (document.getElementById('panel-right'));
+  const contentLeft  = /** @type {HTMLElement} */ (document.getElementById('content-left'));
+  const contentCenter= /** @type {HTMLElement} */ (document.getElementById('content-center'));
+  const contentRight = /** @type {HTMLElement} */ (document.getElementById('content-right'));
+  const gutterLeft   = /** @type {HTMLElement} */ (document.getElementById('gutter-left'));
+  const gutterRight  = /** @type {HTMLElement} */ (document.getElementById('gutter-right'));
+  const canvasLeft   = /** @type {HTMLCanvasElement} */ (document.getElementById('canvas-left'));
+  const canvasRight  = /** @type {HTMLCanvasElement} */ (document.getElementById('canvas-right'));
+  const counter      = /** @type {HTMLElement} */ (document.getElementById('conflict-counter'));
+  const branchLeft   = /** @type {HTMLElement} */ (document.getElementById('branch-left'));
+  const branchRight  = /** @type {HTMLElement} */ (document.getElementById('branch-right'));
+  const statusEl     = /** @type {HTMLElement} */ (document.getElementById('status-conflicts'));
+  const mergeBranch  = /** @type {HTMLElement} */ (document.getElementById('merge-branch'));
+
+  // ── §15 Toolbar buttons ────────────────────────────────────
+  document.getElementById('btn-prev').addEventListener('click', () => navigate(-1));
+  document.getElementById('btn-next').addEventListener('click', () => navigate(+1));
+  document.getElementById('btn-accept-left').addEventListener('click',  acceptAllLeft);
+  document.getElementById('btn-accept-right').addEventListener('click', acceptAllRight);
+  document.getElementById('btn-cancel').addEventListener('click', () => vscode.postMessage({ type: 'abort' }));
+  document.getElementById('btn-apply').addEventListener('click',  () => vscode.postMessage({ type: 'apply' }));
+  document.getElementById('btn-apply-left').addEventListener('click',  acceptAllLeft);
+  document.getElementById('btn-apply-right').addEventListener('click', acceptAllRight);
+  document.getElementById('btn-apply-all').addEventListener('click',   () => { acceptAllLeft(); acceptAllRight(); });
 
   document.addEventListener('keydown', e => {
     if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); navigate(+1); }
     if (e.altKey && e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
   });
 
-  // ── Navigation ────────────────────────────────────────────────────────────
-  function navigate(d) {
-    if (!state) return;
-    const next = activeIdx + d;
-    if (next >= 0 && next < state.totalConflicts) { setActive(next); scrollToConflict(next); }
-  }
-
-  function setActive(idx) {
-    activeIdx = idx;
-    document.querySelectorAll('.active-conflict').forEach(el => el.classList.remove('active-conflict'));
-    document.querySelectorAll(`[data-ci="${idx}"]`).forEach(el => el.classList.add('active-conflict'));
-    updateToolbar();
-  }
-
-  function scrollToConflict(idx) {
-    const el = document.querySelector(`tr.row-action[data-ci="${idx}"]`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-
-  // ── Rejected state helpers (client-side only) ─────────────────────────────
-  function getRejected(ci) {
-    if (!state) return { yours: [], theirs: [] };
-    if (!rejectedLines[ci]) {
-      const c = state.conflicts[ci];
-      rejectedLines[ci] = {
-        yours:  fill(c.yoursLines.length,  false),
-        theirs: fill(c.theirsLines.length, false),
-      };
-    }
-    return rejectedLines[ci];
-  }
-
-  // ── Resolution helpers ────────────────────────────────────────────────────
-  function getLineState(ci) {
-    if (!state) return { yoursSelected: [], theirsSelected: [], yoursBelow: [], theirsBelow: [] };
-    const c   = state.conflicts[ci];
-    const res = state.resolutions[ci] ?? { type: 'unresolved' };
-    const nY  = c.yoursLines.length;
-    const nT  = c.theirsLines.length;
-    switch (res.type) {
-      case 'yours':
-        return { yoursSelected: fill(nY, true),  theirsSelected: fill(nT, false), yoursBelow: fill(nY, false), theirsBelow: fill(nT, false) };
-      case 'theirs':
-        return { yoursSelected: fill(nY, false), theirsSelected: fill(nT, true),  yoursBelow: fill(nY, false), theirsBelow: fill(nT, false) };
-      case 'both':
-      case 'both-reversed':
-        return { yoursSelected: fill(nY, true),  theirsSelected: fill(nT, true),  yoursBelow: fill(nY, false), theirsBelow: fill(nT, false) };
-      case 'ignored':
-        return { yoursSelected: fill(nY, false), theirsSelected: fill(nT, false), yoursBelow: fill(nY, false), theirsBelow: fill(nT, false) };
-      case 'line-selection':
-        return {
-          yoursSelected:  res.yoursSelected  ?? fill(nY, false),
-          theirsSelected: res.theirsSelected ?? fill(nT, false),
-          yoursBelow:     res.yoursBelow     ?? fill(nY, false),
-          theirsBelow:    res.theirsBelow    ?? fill(nT, false),
-        };
-      default:
-        return { yoursSelected: fill(nY, false), theirsSelected: fill(nT, false), yoursBelow: fill(nY, false), theirsBelow: fill(nT, false) };
-    }
-  }
-
-  function getResultLines(ci) {
-    if (!state) return [];
-    const c  = state.conflicts[ci];
-    const ls = getLineState(ci);
-    const r  = [];
-    c.yoursLines.forEach((line, i) => {
-      if (ls.yoursSelected[i] && !ls.yoursBelow[i]) r.push({ line, src: 'yours', si: i, below: false });
-    });
-    c.theirsLines.forEach((line, i) => {
-      if (ls.theirsSelected[i] && !ls.theirsBelow[i]) r.push({ line, src: 'theirs', si: i, below: false });
-    });
-    c.yoursLines.forEach((line, i) => {
-      if (ls.yoursSelected[i] && ls.yoursBelow[i]) r.push({ line, src: 'yours', si: i, below: true });
-    });
-    c.theirsLines.forEach((line, i) => {
-      if (ls.theirsSelected[i] && ls.theirsBelow[i]) r.push({ line, src: 'theirs', si: i, below: true });
-    });
-    return r;
-  }
-
-  function isResolved(ci) { return state?.resolutions[ci]?.type !== 'unresolved'; }
-  function resType(ci)    { return state?.resolutions[ci]?.type ?? 'unresolved'; }
-  function fill(n, v)     { return Array(n).fill(v); }
-
-  // ── Per-line toggle inline (▷ / ◁) ────────────────────────────────────────
-  function toggleLine(ci, source, li) {
-    const ls = getLineState(ci);
-    const rj = getRejected(ci);
-    if (source === 'yours') {
-      rj.yours[li] = false; // clear reject mark when adding
-      if (ls.yoursSelected[li] && ls.yoursBelow[li]) {
-        ls.yoursBelow[li] = false;          // was below → move inline
-      } else if (ls.yoursSelected[li]) {
-        ls.yoursSelected[li] = false;       // was inline → remove
-        ls.yoursBelow[li]    = false;
-      } else {
-        ls.yoursSelected[li] = true;        // off → add inline
-        ls.yoursBelow[li]    = false;
-      }
-    } else {
-      rj.theirs[li] = false;
-      if (ls.theirsSelected[li] && ls.theirsBelow[li]) {
-        ls.theirsBelow[li] = false;
-      } else if (ls.theirsSelected[li]) {
-        ls.theirsSelected[li] = false;
-        ls.theirsBelow[li]    = false;
-      } else {
-        ls.theirsSelected[li] = true;
-        ls.theirsBelow[li]    = false;
-      }
-    }
-    applyLineState(ci, ls);
-  }
-
-  // ── Per-line toggle below (▽) ─────────────────────────────────────────────
-  function toggleBelow(ci, source, li) {
-    const ls = getLineState(ci);
-    const rj = getRejected(ci);
-    if (source === 'yours') {
-      rj.yours[li] = false;
-      if (ls.yoursSelected[li] && ls.yoursBelow[li]) {
-        ls.yoursSelected[li] = false; ls.yoursBelow[li] = false; // toggle off
-      } else {
-        ls.yoursSelected[li] = true; ls.yoursBelow[li] = true;   // add below
-      }
-    } else {
-      rj.theirs[li] = false;
-      if (ls.theirsSelected[li] && ls.theirsBelow[li]) {
-        ls.theirsSelected[li] = false; ls.theirsBelow[li] = false;
-      } else {
-        ls.theirsSelected[li] = true; ls.theirsBelow[li] = true;
-      }
-    }
-    applyLineState(ci, ls);
-  }
-
-  // ── Per-line reject (×) ────────────────────────────────────────────────────
-  function rejectLine(ci, source, li) {
-    const ls = getLineState(ci);
-    const rj = getRejected(ci);
-    if (source === 'yours') {
-      // Remove from result if it was selected
-      if (ls.yoursSelected[li]) {
-        ls.yoursSelected[li] = false;
-        ls.yoursBelow[li]    = false;
-        state.resolutions[ci] = { type: 'line-selection', yoursSelected: ls.yoursSelected, theirsSelected: ls.theirsSelected, yoursBelow: ls.yoursBelow, theirsBelow: ls.theirsBelow };
-        recomputeMeta();
-        vscode.postMessage({ type: 'toggleLine', conflictIndex: ci, yoursSelected: ls.yoursSelected, theirsSelected: ls.theirsSelected, yoursBelow: ls.yoursBelow, theirsBelow: ls.theirsBelow });
-      }
-      rj.yours[li] = !rj.yours[li]; // toggle rejected mark
-    } else {
-      if (ls.theirsSelected[li]) {
-        ls.theirsSelected[li] = false;
-        ls.theirsBelow[li]    = false;
-        state.resolutions[ci] = { type: 'line-selection', yoursSelected: ls.yoursSelected, theirsSelected: ls.theirsSelected, yoursBelow: ls.yoursBelow, theirsBelow: ls.theirsBelow };
-        recomputeMeta();
-        vscode.postMessage({ type: 'toggleLine', conflictIndex: ci, yoursSelected: ls.yoursSelected, theirsSelected: ls.theirsSelected, yoursBelow: ls.yoursBelow, theirsBelow: ls.theirsBelow });
-      }
-      rj.theirs[li] = !rj.theirs[li];
-    }
-    render(); updateToolbar();
-  }
-
-  // ── Remove result line (× in center gutter) ────────────────────────────────
-  function removeResultLine(ci, src, si) {
-    const ls = getLineState(ci);
-    if (src === 'yours')  { ls.yoursSelected[si]  = false; ls.yoursBelow[si]  = false; }
-    else                  { ls.theirsSelected[si] = false; ls.theirsBelow[si] = false; }
-    applyLineState(ci, ls);
-  }
-
-  function applyLineState(ci, ls) {
-    state.resolutions[ci] = {
-      type: 'line-selection',
-      yoursSelected:  ls.yoursSelected,
-      theirsSelected: ls.theirsSelected,
-      yoursBelow:     ls.yoursBelow,
-      theirsBelow:    ls.theirsBelow,
-    };
-    recomputeMeta();
-    render(); updateToolbar();
-    vscode.postMessage({
-      type: 'toggleLine',
-      conflictIndex:  ci,
-      yoursSelected:  ls.yoursSelected,
-      theirsSelected: ls.theirsSelected,
-      yoursBelow:     ls.yoursBelow,
-      theirsBelow:    ls.theirsBelow,
-    });
-  }
-
-  // ── Undo block resolution ─────────────────────────────────────────────────
-  function blockUndo(ci) {
-    state.resolutions[ci] = { type: 'unresolved' };
-    recomputeMeta();
-    render(); updateToolbar();
-    vscode.postMessage({ type: 'unresolve', conflictIndex: ci });
-  }
-
-  function blockSkip(ci) {
-    state.resolutions[ci] = { type: 'ignored' };
-    recomputeMeta();
-    render(); updateToolbar();
-    vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'ignored' });
-    const next = findNextUnresolved(ci + 1) ?? findNextUnresolved(0);
-    if (next !== null && next !== ci) { setTimeout(() => { setActive(next); scrollToConflict(next); }, 80); }
-  }
-
-  function findNextUnresolved(start) {
-    if (!state) return null;
-    for (let i = start; i < state.totalConflicts; i++) {
-      if (state.resolutions[i]?.type === 'unresolved') return i;
-    }
-    return null;
-  }
-
-  function recomputeMeta() {
-    state.resolvedCount   = state.resolutions.filter(r => r.type !== 'unresolved').length;
-    state.progressPercent = state.totalConflicts > 0
-      ? Math.round(state.resolvedCount / state.totalConflicts * 100) : 100;
-    state.isFullyResolved = state.resolvedCount === state.totalConflicts;
-  }
-
-  // ── Toolbar ────────────────────────────────────────────────────────────────
-  function updateToolbar() {
-    if (!state) return;
-    const { totalConflicts, resolvedCount, progressPercent, isFullyResolved } = state;
-    counter.textContent = `Conflict ${activeIdx + 1} / ${totalConflicts}  ·  ${resolvedCount} resolved`;
-    progressFill.style.width = `${progressPercent}%`;
-    progressLabel.textContent = `${progressPercent}%`;
-    if (isFullyResolved) {
-      statusMsg.textContent = 'All conflicts resolved ✓  —  click Apply to save';
-      statusMsg.className = 'status-done';
-    } else {
-      statusMsg.textContent = `${totalConflicts - resolvedCount} conflict(s) remaining`;
-      statusMsg.className = '';
-    }
-    statusFile.textContent = filePath.split(/[\\/]/).pop() ?? '';
-  }
-
-  // ── Rendering ─────────────────────────────────────────────────────────────
-  function render() {
-    if (!state) return;
-    const frag = document.createDocumentFragment();
-    let lineIdx = 0, lNum = 1;
-
-    for (const c of state.conflicts) {
-      while (lineIdx < c.startLine) { frag.appendChild(normalRow(state.lines[lineIdx], lNum++)); lineIdx++; }
-      appendConflict(frag, c);
-      lineIdx = c.endLine + 1;
-    }
-    while (lineIdx < state.lines.length) { frag.appendChild(normalRow(state.lines[lineIdx], lNum++)); lineIdx++; }
-
-    mergeBody.innerHTML = '';
-    mergeBody.appendChild(frag);
-    wireButtons();
-    document.querySelectorAll(`[data-ci="${activeIdx}"]`).forEach(el => el.classList.add('active-conflict'));
-  }
-
-  // ── Normal row ─────────────────────────────────────────────────────────────
-  function normalRow(line, num) {
-    const tr = mktr('row-normal');
-    const t = esc(line);
-    tr.innerHTML =
-      `<td class="gu"><div class="gi"><span class="ln">${num}</span></div></td>` +
-      `<td class="pa pl">${t}</td>` +
-      `<td class="gu gc"></td>` +
-      `<td class="pa pc">${t}</td>` +
-      `<td class="gu"><div class="gi gi-r"><span class="ln">${num}</span></div></td>` +
-      `<td class="pa pr">${t}</td>`;
-    return tr;
-  }
-
-  // ── Conflict block ─────────────────────────────────────────────────────────
-  function appendConflict(frag, c) {
-    const ci  = c.index;
-    const ls  = getLineState(ci);
-    const rl  = getResultLines(ci);
-    const res = isResolved(ci);
-    frag.appendChild(actionRow(c, res));
-    const nRows = Math.max(c.yoursLines.length, c.theirsLines.length, rl.length, 1);
-    for (let i = 0; i < nRows; i++) frag.appendChild(conflictRow(c, i, ls, rl, res));
-  }
-
-  // ── Action row (conflict header) — NO block buttons ────────────────────────
-  function actionRow(c, resolved) {
-    const ci  = c.index;
-    const rt  = resType(ci);
-    const tr  = mktr('row-action', ci);
-
-    let centerContent;
-    if (!resolved) {
-      centerContent =
-        `<span class="cnum">Conflict ${ci + 1}</span>
-         <div class="bbtns">
-           <button class="abtn btn-sk" data-ci="${ci}" data-action="skip" title="Skip this conflict">Skip</button>
-         </div>`;
-    } else {
-      const labels = {
-        'yours':          'Yours',
-        'theirs':         'Theirs',
-        'both':           'Yours + Theirs',
-        'both-reversed':  'Theirs + Yours',
-        'ignored':        'Skipped',
-        'line-selection': 'Custom',
-        'custom':         'Custom',
-      };
-      const label = labels[rt] ?? 'Resolved';
-      centerContent =
-        `<span class="cnum resolved-cnum">✓ ${ci + 1} <em class="res-label">${label}</em></span>
-         <div class="bbtns">
-           <button class="abtn btn-undo" data-ci="${ci}" data-action="undo">Undo</button>
-         </div>`;
-    }
-
-    tr.innerHTML =
-      `<td class="gu action-gu yours-gu"></td>` +
-      `<td class="pa pl action-pl"><div class="abar yours-abar"></div></td>` +
-      `<td class="gu gc action-gu"></td>` +
-      `<td class="pa pc action-pc"><div class="abar center-abar">${centerContent}</div></td>` +
-      `<td class="gu action-gu theirs-gu"></td>` +
-      `<td class="pa pr action-pr"><div class="abar theirs-abar"></div></td>`;
-    return tr;
-  }
-
-  // ── Per-line conflict row ──────────────────────────────────────────────────
-  function conflictRow(c, i, ls, rl, resolved) {
-    const ci   = c.index;
-    const yL   = c.yoursLines[i];
-    const tL   = c.theirsLines[i];
-    const rL   = rl[i];
-    const rj   = getRejected(ci);
-
-    const yInline = ls.yoursSelected[i]  && !ls.yoursBelow[i];
-    const yBelow  = ls.yoursSelected[i]  && ls.yoursBelow[i];
-    const tInline = ls.theirsSelected[i] && !ls.theirsBelow[i];
-    const tBelow  = ls.theirsSelected[i] && ls.theirsBelow[i];
-    const yRej    = rj.yours[i]  ?? false;
-    const tRej    = rj.theirs[i] ?? false;
-
-    const tr = mktr('row-conflict', ci);
-
-    // ── Left gutter: ▷ (inline) ▽ (below) × (reject) ──
-    let lgHTML;
-    if (yL !== undefined) {
-      let guClass = 'gu gu-l';
-      if      (yInline) guClass += ' gu-yours-sel';
-      else if (yBelow)  guClass += ' gu-yours-below';
-      else if (yRej)    guClass += ' gu-yours-rej';
-      else              guClass += ' gu-yours';
-
-      const inClass  = 'lb'          + (yInline ? ' lb-on'           : '');
-      const dnClass  = 'lb lb-down'  + (yBelow  ? ' lb-down-on'      : '');
-      const rejClass = 'lb lb-reject'+ (yRej    ? ' lb-reject-on'    : '');
-
-      lgHTML = `<td class="${guClass}">
-        <div class="gi">
-          <div class="line-btns">
-            <button class="${inClass}"  data-ci="${ci}" data-action="toggleYours"  data-li="${i}" title="${yInline ? 'Remove from result' : 'Add to result'}">▷</button>
-            <button class="${dnClass}"  data-ci="${ci}" data-action="addBelowYours" data-li="${i}" title="${yBelow  ? 'Remove from end'  : 'Add at end of result'}">▽</button>
-            <button class="${rejClass}" data-ci="${ci}" data-action="rejectYours"  data-li="${i}" title="${yRej    ? 'Clear rejection'   : 'Reject this line'}">✕</button>
-          </div>
-          <span class="ln">${i + 1}</span>
-        </div>
-      </td>`;
-    } else {
-      lgHTML = `<td class="gu gu-pad"></td>`;
-    }
-
-    // ── Left content ──
-    let lcHTML;
-    if (yL !== undefined) {
-      let cls = 'pa pl';
-      if      (yInline) cls += ' yours-sel';
-      else if (yBelow)  cls += ' yours-below';
-      else if (yRej)    cls += ' yours-rej';
-      else              cls += ' yours-line';
-      lcHTML = `<td class="${cls}" data-ci="${ci}">${esc(yL)}</td>`;
-    } else {
-      lcHTML = `<td class="pa pl cpad" data-ci="${ci}"></td>`;
-    }
-
-    // ── Center gutter ──
-    let cgHTML;
-    if (rL) {
-      const xCls = 'xb' + (rL.below ? ' xb-below' : '');
-      cgHTML = `<td class="gu gc">
-        <button class="${xCls}" data-ci="${ci}" data-action="removeResult" data-src="${rL.src}" data-si="${rL.si}"
-          title="Remove from result">×</button>
-      </td>`;
-    } else {
-      cgHTML = `<td class="gu gc"></td>`;
-    }
-
-    // ── Center content ──
-    let ccHTML;
-    if (rL) {
-      let cls = `pa pc result-line result-${rL.src}` + (rL.below ? ' result-below' : '');
-      ccHTML = `<td class="${cls}" data-ci="${ci}">${esc(rL.line)}</td>`;
-    } else {
-      ccHTML = `<td class="pa pc" data-ci="${ci}"></td>`;
-    }
-
-    // ── Right gutter: × (reject) ▽ (below) ◁ (inline) ──
-    let rgHTML;
-    if (tL !== undefined) {
-      let guClass = 'gu gu-r';
-      if      (tInline) guClass += ' gu-theirs-sel';
-      else if (tBelow)  guClass += ' gu-theirs-below';
-      else if (tRej)    guClass += ' gu-theirs-rej';
-      else              guClass += ' gu-theirs';
-
-      const rejClass = 'lb lb-reject lb-reject-r' + (tRej    ? ' lb-reject-on'    : '');
-      const dnClass  = 'lb lb-down lb-down-r'      + (tBelow  ? ' lb-down-r-on'    : '');
-      const inClass  = 'lb lb-r'                   + (tInline ? ' lb-r-on'         : '');
-
-      rgHTML = `<td class="${guClass}">
-        <div class="gi gi-r">
-          <span class="ln">${i + 1}</span>
-          <div class="line-btns">
-            <button class="${rejClass}" data-ci="${ci}" data-action="rejectTheirs"   data-li="${i}" title="${tRej   ? 'Clear rejection'   : 'Reject this line'}">✕</button>
-            <button class="${dnClass}"  data-ci="${ci}" data-action="addBelowTheirs" data-li="${i}" title="${tBelow ? 'Remove from end'    : 'Add at end of result'}">▽</button>
-            <button class="${inClass}"  data-ci="${ci}" data-action="toggleTheirs"   data-li="${i}" title="${tInline ? 'Remove from result' : 'Add to result'}">◁</button>
-          </div>
-        </div>
-      </td>`;
-    } else {
-      rgHTML = `<td class="gu gu-pad"></td>`;
-    }
-
-    // ── Right content ──
-    let rcHTML;
-    if (tL !== undefined) {
-      let cls = 'pa pr';
-      if      (tInline) cls += ' theirs-sel';
-      else if (tBelow)  cls += ' theirs-below';
-      else if (tRej)    cls += ' theirs-rej';
-      else              cls += ' theirs-line';
-      rcHTML = `<td class="${cls}" data-ci="${ci}">${esc(tL)}</td>`;
-    } else {
-      rcHTML = `<td class="pa pr cpad" data-ci="${ci}"></td>`;
-    }
-
-    tr.innerHTML = lgHTML + lcHTML + cgHTML + ccHTML + rgHTML + rcHTML;
-    return tr;
-  }
-
-  // ── Event wiring ──────────────────────────────────────────────────────────
-  function wireButtons() {
-    mergeBody.querySelectorAll('[data-action]').forEach(el => {
-      el.addEventListener('click', e => {
-        e.stopPropagation();
-        const d      = /** @type {any} */(el).dataset;
-        const ci     = parseInt(d['ci'], 10);
-        const li     = parseInt(d['li'], 10);
-        const action = d['action'];
-        switch (action) {
-          case 'toggleYours':    toggleLine(ci, 'yours',  li); break;
-          case 'toggleTheirs':   toggleLine(ci, 'theirs', li); break;
-          case 'addBelowYours':  toggleBelow(ci, 'yours',  li); break;
-          case 'addBelowTheirs': toggleBelow(ci, 'theirs', li); break;
-          case 'rejectYours':    rejectLine(ci, 'yours',  li); break;
-          case 'rejectTheirs':   rejectLine(ci, 'theirs', li); break;
-          case 'removeResult':   removeResultLine(ci, d['src'], parseInt(d['si'], 10)); break;
-          case 'skip':           blockSkip(ci);  break;
-          case 'undo':           blockUndo(ci);  break;
-        }
-        setActive(ci);
+  // ── §14 Scroll sync ─────────────────────────────────────────
+  function setupScrollSync() {
+    const panels = [panelLeft, panelCenter, panelRight];
+    panels.forEach(src => {
+      src.addEventListener('scroll', () => {
+        if (isSyncing) return;
+        isSyncing = true;
+        const top = src.scrollTop;
+        panels.forEach(dst => { if (dst !== src) dst.scrollTop = top; });
+        isSyncing = false;
+        requestAnimationFrame(refreshGutter);
       });
     });
   }
 
-  // ── DOM helpers ───────────────────────────────────────────────────────────
-  function mktr(cls, ci) {
-    const tr = document.createElement('tr');
-    tr.className = cls;
-    if (ci !== undefined) tr.dataset['ci'] = String(ci);
-    return tr;
+  function refreshGutter() {
+    updateGutterButtons();
+    drawConnections();
+    updateCursorIndicator();
   }
 
-  function esc(s) {
-    if (s == null) return '';
-    return String(s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/\t/g, '    ');
+  // ── Gutter event delegation — set up ONCE, never re-attached ─
+  function setupGutterDelegation() {
+    gutterLeft.addEventListener('click', e => {
+      const btn = /** @type {HTMLElement} */ (e.target);
+      const action = btn.dataset['action'];
+      if (!action) return;
+      e.stopPropagation();
+      const ci = parseInt(btn.dataset['ci'], 10);
+      dispatchAction(action, ci);
+    });
+
+    gutterRight.addEventListener('click', e => {
+      const btn = /** @type {HTMLElement} */ (e.target);
+      const action = btn.dataset['action'];
+      if (!action) return;
+      e.stopPropagation();
+      const ci = parseInt(btn.dataset['ci'], 10);
+      dispatchAction(action, ci);
+    });
   }
 
-  // ── Message handler ───────────────────────────────────────────────────────
+  function dispatchAction(action, ci) {
+    switch (action) {
+      case 'accept-left':  acceptLeft(ci);  break;
+      case 'accept-right': acceptRight(ci); break;
+      case 'reject':       rejectConflict(ci); break;
+    }
+    setActive(ci);
+  }
+
+  // ── Message handler ─────────────────────────────────────────
   window.addEventListener('message', ev => {
     const msg = ev.data;
     if (msg.type === 'init') {
-      filePath = msg.filePath ?? '';
-      state = msg.state;
-      const yn = state.yoursBranchName;
-      const tn = state.theirsBranchName;
-      lblYours.textContent  = (!yn || yn === 'HEAD') ? 'Yours'  : yn;
-      lblTheirs.textContent = (!tn || tn === 'HEAD') ? 'Theirs' : tn;
-      activeIdx = 0;
-      render(); updateToolbar();
+      rawState = msg.state;
+      const yn = rawState.yoursBranchName;
+      const tn = rawState.theirsBranchName;
+      branchLeft.textContent  = (!yn || yn === 'HEAD') ? 'yours'  : yn;
+      branchRight.textContent = (!tn || tn === 'HEAD') ? 'theirs' : tn;
+      if (mergeBranch) mergeBranch.textContent = `▲ Merging ${yn || ''}`;
+      syncResFromState();
+      buildSegments();
+      renderAll();
+      updateUI();
+      setupScrollSync();
+      setupGutterDelegation();       // wired once, survives re-renders
       requestAnimationFrame(() => scrollToConflict(0));
     } else if (msg.type === 'stateUpdate') {
-      state = msg.state;
-      render(); updateToolbar();
+      rawState = msg.state;
+      syncResFromState();
+      buildSegments();
+      renderAll();
+      updateUI();
     } else if (msg.type === 'command') {
-      handleCommand(msg.command);
+      if (msg.command === 'nextConflict')     navigate(+1);
+      if (msg.command === 'previousConflict') navigate(-1);
     }
   });
 
-  function handleCommand(cmd) {
-    switch (cmd) {
-      case 'nextConflict':     navigate(+1); break;
-      case 'previousConflict': navigate(-1); break;
+  // ── Sync extension resolutions into localRes ───────────────
+  function syncResFromState() {
+    if (!rawState) return;
+    rawState.resolutions.forEach((res, ci) => {
+      if (localRes[ci] && localRes[ci].type !== 'empty') return; // keep local decision
+      const c = rawState.conflicts[ci];
+      switch (res.type) {
+        case 'yours':
+          localRes[ci] = { type: 'accepted-left',  lines: [...c.yoursLines] };
+          break;
+        case 'theirs':
+          localRes[ci] = { type: 'accepted-right', lines: [...c.theirsLines] };
+          break;
+        case 'both':
+          localRes[ci] = { type: 'both', lines: [...c.yoursLines, ...c.theirsLines] };
+          break;
+        case 'both-reversed':
+          localRes[ci] = { type: 'both', lines: [...c.theirsLines, ...c.yoursLines] };
+          break;
+        default:
+          if (!localRes[ci]) localRes[ci] = { type: 'empty', lines: [] };
+          break;
+      }
+    });
+  }
+
+  // ── Build aligned segments ──────────────────────────────────
+  // La hauteur de chaque bloc = max(yours, theirs, resolvedLines, 1) * LINE_H
+  // Ainsi, quand on accepte les deux côtés, le bloc grandit et décale le code en dessous.
+  function buildSegments() {
+    if (!rawState) return;
+    segments = [];
+    let lineIdx = 0, leftNum = 1, rightNum = 1;
+
+    for (const c of rawState.conflicts) {
+      if (c.startLine > lineIdx) {
+        const lines = rawState.lines.slice(lineIdx, c.startLine);
+        segments.push({ type: 'normal', lines, leftNum, rightNum });
+        leftNum  += lines.length;
+        rightNum += lines.length;
+        lineIdx   = c.startLine;
+      }
+      // La hauteur tient compte des lignes résolues pour que le résultat puisse
+      // grandir au-delà du max(yours, theirs) d'origine.
+      const resolvedCount = (localRes[c.index]?.lines ?? []).length;
+      const h = Math.max(c.yoursLines.length, c.theirsLines.length, resolvedCount, 1) * LINE_H;
+      segments.push({ type: 'conflict', conflict: c, h, leftNum, rightNum });
+      leftNum  += c.yoursLines.length;
+      rightNum += c.theirsLines.length;
+      lineIdx   = c.endLine + 1;
+    }
+    if (lineIdx < rawState.lines.length) {
+      segments.push({ type: 'normal', lines: rawState.lines.slice(lineIdx), leftNum, rightNum });
     }
   }
 
+  // ── Render all three panels ──────────────────────────────────
+  function renderAll() {
+    if (!rawState) return;
+
+    const fL = document.createDocumentFragment();
+    const fC = document.createDocumentFragment();
+    const fR = document.createDocumentFragment();
+
+    for (const seg of segments) {
+      if (seg.type === 'normal') {
+        renderNormal(fL, fC, fR, seg);
+      } else {
+        renderConflict(fL, fC, fR, seg);
+      }
+    }
+
+    contentLeft.innerHTML   = '';
+    contentCenter.innerHTML = '';
+    contentRight.innerHTML  = '';
+    contentLeft.appendChild(fL);
+    contentCenter.appendChild(fC);
+    contentRight.appendChild(fR);
+
+    requestAnimationFrame(refreshGutter);
+  }
+
+  // ── Normal lines ─────────────────────────────────────────────
+  function renderNormal(fL, fC, fR, seg) {
+    seg.lines.forEach((line, i) => {
+      const lN = seg.leftNum  + i;
+      const rN = seg.rightNum + i;
+      const t  = esc(line);
+      fL.appendChild(mkRow(`<span class="ln">${lN}</span><span class="line-content">${t}</span>`, 'normal-line'));
+      fC.appendChild(mkRow(`<span class="ln">${lN}</span><span class="ln">${rN}</span><span class="line-content">${t}</span>`, 'normal-line'));
+      fR.appendChild(mkRow(`<span class="ln">${rN}</span><span class="line-content">${t}</span>`, 'normal-line'));
+    });
+  }
+
+  function mkRow(inner, cls) {
+    const d = document.createElement('div');
+    d.className = 'line-row' + (cls ? ' ' + cls : '');
+    d.innerHTML = inner;
+    return d;
+  }
+
+  // ── Conflict blocks ──────────────────────────────────────────
+  // seg.h = max(yours, theirs, resolved, 1) * LINE_H   (calculé dans buildSegments)
+  // Les 3 blocs utilisent tous cette même hauteur → alignement parfait même si
+  // le résultat a plus de lignes que la version d'origine.
+  function renderConflict(fL, fC, fR, seg) {
+    const c   = seg.conflict;
+    const ci  = c.index;
+    const h   = seg.h;
+    const res = localRes[ci] ?? { type: 'empty', lines: [] };
+
+    // ── LEFT (lecture seule) ─────────────────────────────────
+    const bL = mkBlock('conflict-block-left', ci, h);
+    c.yoursLines.forEach((line, i) => {
+      bL.appendChild(mkRow(
+        `<span class="ln">${seg.leftNum + i}</span><span class="line-content">${esc(line)}</span>`
+      ));
+    });
+    padBlock(bL, c.yoursLines.length, h);   // lignes vides si yours < h
+    fL.appendChild(bL);
+
+    // ── CENTER (résultat, hauteur dynamique) ─────────────────
+    const wrap = mkBlock('conflict-center-wrap', ci, h);
+    wrap.style.maxHeight = h + 'px';
+    if (res.type !== 'empty') wrap.classList.add('resolved');
+    const bC = document.createElement('div');
+    bC.className = 'conflict-block-center' + (res.type !== 'empty' ? ' resolved' : '');
+    bC.style.minHeight = h + 'px';
+    if (res.type !== 'empty') {
+      res.lines.forEach((line, i) => {
+        bC.appendChild(mkRow(
+          `<span class="ln">${seg.leftNum + i}</span>` +
+          `<span class="ln">${seg.rightNum + i}</span>` +
+          `<span class="line-content">${esc(line)}</span>`
+        ));
+      });
+    }
+    wrap.appendChild(bC);
+    fC.appendChild(wrap);
+
+    // ── RIGHT (lecture seule) ────────────────────────────────
+    const bR = mkBlock('conflict-block-right', ci, h);
+    c.theirsLines.forEach((line, i) => {
+      bR.appendChild(mkRow(
+        `<span class="ln">${seg.rightNum + i}</span><span class="line-content">${esc(line)}</span>`
+      ));
+    });
+    padBlock(bR, c.theirsLines.length, h);   // lignes vides si theirs < h
+    fR.appendChild(bR);
+  }
+
+  function mkBlock(cls, ci, h) {
+    const d = document.createElement('div');
+    d.className = 'conflict-block ' + cls;
+    d.dataset['ci'] = String(ci);
+    d.style.height = h + 'px';
+    return d;
+  }
+
+  function padBlock(el, usedLines, totalH) {
+    for (let y = usedLines * LINE_H; y < totalH; y += LINE_H) {
+      const p = document.createElement('div');
+      p.className = 'line-row';
+      p.style.height = LINE_H + 'px';
+      el.appendChild(p);
+    }
+  }
+
+  // ── §15 Actions ──────────────────────────────────────────────
+  // Chaque action recalcule la hauteur des blocs (buildSegments) et re-rend
+  // les 3 panneaux (renderAll) pour que le code en dessous se décale correctement.
+
+  function acceptLeft(ci) {
+    if (!rawState) return;
+    const c   = rawState.conflicts[ci];
+    const cur = localRes[ci];
+    if (cur && cur.type === 'accepted-right') {
+      localRes[ci] = { type: 'both', lines: [...c.yoursLines, ...c.theirsLines] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'both' });
+    } else {
+      localRes[ci] = { type: 'accepted-left', lines: [...c.yoursLines] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'yours' });
+    }
+    applyResolution(ci);
+  }
+
+  function acceptRight(ci) {
+    if (!rawState) return;
+    const c   = rawState.conflicts[ci];
+    const cur = localRes[ci];
+    if (cur && cur.type === 'accepted-left') {
+      localRes[ci] = { type: 'both', lines: [...c.yoursLines, ...c.theirsLines] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'both' });
+    } else {
+      localRes[ci] = { type: 'accepted-right', lines: [...c.theirsLines] };
+      vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'theirs' });
+    }
+    applyResolution(ci);
+  }
+
+  function rejectConflict(ci) {
+    localRes[ci] = { type: 'empty', lines: [] };
+    vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'ignored' });
+    applyResolution(ci);
+  }
+
+  // Recalcule les hauteurs et re-rend tout — le code en dessous se décale automatiquement.
+  function applyResolution(ci) {
+    buildSegments();   // hauteurs recalculées avec resolvedCount
+    renderAll();       // 3 panneaux re-rendus avec les nouvelles hauteurs
+    updateUI();
+    setActive(ci);
+  }
+
+  function acceptAllLeft() {
+    if (!rawState) return;
+    rawState.conflicts.forEach(c => {
+      if (!localRes[c.index] || localRes[c.index].type === 'empty') {
+        const ci = c.index;
+        localRes[ci] = { type: 'accepted-left', lines: [...c.yoursLines] };
+        vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'yours' });
+      }
+    });
+    buildSegments(); renderAll(); updateUI();
+  }
+
+  function acceptAllRight() {
+    if (!rawState) return;
+    rawState.conflicts.forEach(c => {
+      if (!localRes[c.index] || localRes[c.index].type === 'empty') {
+        const ci = c.index;
+        localRes[ci] = { type: 'accepted-right', lines: [...c.theirsLines] };
+        vscode.postMessage({ type: 'resolve', conflictIndex: ci, resolutionType: 'theirs' });
+      }
+    });
+    buildSegments(); renderAll(); updateUI();
+  }
+
+  // ── Navigation ───────────────────────────────────────────────
+  function navigate(d) {
+    if (!rawState) return;
+    const next = activeConflictIdx + d;
+    if (next >= 0 && next < rawState.totalConflicts) {
+      setActive(next);
+      scrollToConflict(next);
+    }
+  }
+
+  function setActive(idx) {
+    activeConflictIdx = idx;
+    document.querySelectorAll('.conflict-active').forEach(el => el.classList.remove('conflict-active'));
+    contentLeft.querySelector(`.conflict-block[data-ci="${idx}"]`)?.classList.add('conflict-active');
+    contentCenter.querySelector(`.conflict-center-wrap[data-ci="${idx}"]`)?.classList.add('conflict-active');
+    contentRight.querySelector(`.conflict-block[data-ci="${idx}"]`)?.classList.add('conflict-active');
+    updateUI();
+    requestAnimationFrame(() => { updateGutterButtons(); updateCursorIndicator(); });
+  }
+
+  function scrollToConflict(idx) {
+    const b = contentLeft.querySelector(`.conflict-block[data-ci="${idx}"]`);
+    if (b) b.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ── §6/§7 Gutter buttons — pure DOM, no listeners (delegation handles clicks) ─
+  function updateGutterButtons() {
+    gutterLeft.querySelectorAll('.gutter-actions').forEach(el => el.remove());
+    gutterRight.querySelectorAll('.gutter-actions').forEach(el => el.remove());
+    if (!rawState) return;
+
+    const gLRect = gutterLeft.getBoundingClientRect();
+    const gRRect = gutterRight.getBoundingClientRect();
+    if (gLRect.height === 0) return;
+
+    rawState.conflicts.forEach(c => {
+      const ci = c.index;
+      const bL = contentLeft.querySelector(`.conflict-block[data-ci="${ci}"]`);
+      const bR = contentRight.querySelector(`.conflict-block[data-ci="${ci}"]`);
+      const bC = contentCenter.querySelector(`.conflict-center-wrap[data-ci="${ci}"]`);
+      if (!bL) return;
+
+      const rL = bL.getBoundingClientRect();
+      const rC = bC ? bC.getBoundingClientRect() : rL;
+      const rR = bR ? bR.getBoundingClientRect() : rL;
+
+      const midL = (rL.top + rL.bottom) / 2 - gLRect.top;
+      const midR = (rC.top + rC.bottom) / 2 - gRRect.top;
+
+      // Only render if at least partially visible
+      if (rL.bottom - gLRect.top < 0 || rL.top - gLRect.top > gLRect.height) return;
+
+      // Left gutter: [×] then [»]
+      const grpL = document.createElement('div');
+      grpL.className = 'gutter-actions';
+      grpL.style.top = `${midL - 20}px`;
+      grpL.innerHTML =
+        `<button class="g-btn g-btn-reject"      data-ci="${ci}" data-action="reject"       title="Reject">×</button>` +
+        `<button class="g-btn g-btn-accept-left" data-ci="${ci}" data-action="accept-left"  title="Accept Left">»</button>`;
+      gutterLeft.appendChild(grpL);
+
+      // Right gutter: [«] then [×]
+      if (rR.bottom - gRRect.top >= 0 && rR.top - gRRect.top <= gRRect.height) {
+        const grpR = document.createElement('div');
+        grpR.className = 'gutter-actions';
+        grpR.style.top = `${midR - 20}px`;
+        grpR.innerHTML =
+          `<button class="g-btn g-btn-accept-right" data-ci="${ci}" data-action="accept-right" title="Accept Right">«</button>` +
+          `<button class="g-btn g-btn-reject"        data-ci="${ci}" data-action="reject"        title="Reject">×</button>`;
+        gutterRight.appendChild(grpR);
+      }
+    });
+  }
+
+  // ── Cursor indicator ▶ ───────────────────────────────────────
+  function updateCursorIndicator() {
+    gutterLeft.querySelectorAll('.cursor-ind').forEach(el => el.remove());
+    if (!rawState) return;
+    const bL = contentLeft.querySelector(`.conflict-block[data-ci="${activeConflictIdx}"]`);
+    if (!bL) return;
+    const gRect = gutterLeft.getBoundingClientRect();
+    const bRect = bL.getBoundingClientRect();
+    const top   = (bRect.top + bRect.bottom) / 2 - gRect.top;
+    const ind   = document.createElement('div');
+    ind.className = 'cursor-ind';
+    ind.style.top = `${top}px`;
+    gutterLeft.appendChild(ind);
+  }
+
+  // ── §8 Canvas connections (trapeze) ─────────────────────────
+  function drawConnections() {
+    if (!rawState) return;
+    drawCanvas(canvasLeft,  gutterLeft,  'left');
+    drawCanvas(canvasRight, gutterRight, 'right');
+  }
+
+  function drawCanvas(canvas, gutter, side) {
+    const gRect = gutter.getBoundingClientRect();
+    const W = Math.round(gRect.width);
+    const H = Math.round(gRect.height);
+    if (W === 0 || H === 0) return;
+
+    canvas.width  = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
+    rawState.conflicts.forEach(c => {
+      const ci = c.index;
+      const srcEl = side === 'left'
+        ? contentLeft.querySelector(`.conflict-block[data-ci="${ci}"]`)
+        : contentCenter.querySelector(`.conflict-center-wrap[data-ci="${ci}"]`);
+      const dstEl = side === 'left'
+        ? contentCenter.querySelector(`.conflict-center-wrap[data-ci="${ci}"]`)
+        : contentRight.querySelector(`.conflict-block[data-ci="${ci}"]`);
+      if (!srcEl || !dstEl) return;
+
+      const rS = srcEl.getBoundingClientRect();
+      const rD = dstEl.getBoundingClientRect();
+      const sT = rS.top    - gRect.top;
+      const sB = rS.bottom - gRect.top;
+      const dT = rD.top    - gRect.top;
+      const dB = rD.bottom - gRect.top;
+
+      const fill   = side === 'left' ? 'rgba(133,74,50,0.15)'  : 'rgba(50,80,130,0.15)';
+      const stroke = side === 'left' ? '#855a3a' : '#4a6fa5';
+      drawTrapeze(ctx, W, sT, sB, dT, dB, fill, stroke, side);
+    });
+  }
+
+  function drawTrapeze(ctx, W, sT, sB, dT, dB, fill, stroke, side) {
+    ctx.beginPath();
+    if (side === 'left') {
+      ctx.moveTo(0, sT); ctx.lineTo(W, dT);
+      ctx.lineTo(W, dB); ctx.lineTo(0, sB);
+    } else {
+      ctx.moveTo(0, dT); ctx.lineTo(W, sT);
+      ctx.lineTo(W, sB); ctx.lineTo(0, dB);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    if (side === 'left') {
+      ctx.moveTo(0, sT); ctx.lineTo(W, dT);
+      ctx.moveTo(0, sB); ctx.lineTo(W, dB);
+    } else {
+      ctx.moveTo(0, dT); ctx.lineTo(W, sT);
+      ctx.moveTo(0, dB); ctx.lineTo(W, sB);
+    }
+    ctx.stroke();
+  }
+
+  // ── UI counter + status ──────────────────────────────────────
+  function updateUI() {
+    if (!rawState) return;
+    const total    = rawState.totalConflicts;
+    const resolved = Object.values(localRes).filter(r => r.type !== 'empty').length;
+    const remaining = total - resolved;
+    counter.textContent = `${activeConflictIdx + 1} / ${total}`;
+    if (remaining === 0) {
+      statusEl.textContent = 'All conflicts resolved ✓';
+    } else {
+      statusEl.innerHTML =
+        `${remaining} unresolved conflict${remaining > 1 ? 's' : ''} // ` +
+        `<a href="#" id="status-resolve">Resolve...</a>`;
+    }
+  }
+
+  // ── Escape HTML ──────────────────────────────────────────────
+  function esc(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      .replace(/\t/g, '    ');
+  }
+
+  // ── Resize ───────────────────────────────────────────────────
+  window.addEventListener('resize', () => requestAnimationFrame(refreshGutter));
+
+  // ── Ready ────────────────────────────────────────────────────
   vscode.postMessage({ type: 'ready' });
 })();

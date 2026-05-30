@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="mergeEditor.css">
+  <title>Merge Editor — Test Harness</title>
+  <style>
+    /* Shim acquireVsCodeApi for standalone testing */
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <div id="toolbar">
+    <button id="btn-prev"  class="tb-icon" title="Previous conflict (Alt+↑)">↑</button>
+    <button id="btn-next"  class="tb-icon" title="Next conflict (Alt+↓)">↓</button>
+    <button class="tb-icon" title="Jump to conflict">↗</button>
+    <div class="tb-sep"></div>
+    <span class="tb-label">Apply non-conflicting changes:</span>
+    <button id="btn-apply-left"  class="tb-btn">Left</button>
+    <button id="btn-apply-all"   class="tb-btn">All</button>
+    <button id="btn-apply-right" class="tb-btn">Right</button>
+    <div class="tb-sep"></div>
+    <button class="tb-dropdown">Do not ignore</button>
+    <button class="tb-dropdown">Highlight words</button>
+    <div class="tb-spacer"></div>
+    <span id="conflict-counter">1 / 2</span>
+  </div>
+
+  <div id="column-headers">
+    <div class="col-header" id="header-left">
+      Changes from <strong id="branch-left">main</strong>
+      <a class="show-details" href="#">Show Details</a>
+    </div>
+    <div class="col-header-gutter"></div>
+    <div class="col-header" id="header-center">Result</div>
+    <div class="col-header-gutter"></div>
+    <div class="col-header" id="header-right">
+      Changes from <strong id="branch-right">feature</strong>
+      <a class="show-details" href="#">Show Details</a>
+    </div>
+  </div>
+
+  <div id="merge-container">
+
+    <div id="panel-left" class="merge-panel">
+      <div class="panel-content" id="content-left"></div>
+    </div>
+
+    <div id="gutter-left" class="gutter">
+      <canvas id="canvas-left"></canvas>
+    </div>
+
+    <div id="panel-center" class="merge-panel">
+      <div class="panel-content" id="content-center"></div>
+    </div>
+
+    <div id="gutter-right" class="gutter">
+      <canvas id="canvas-right"></canvas>
+    </div>
+
+    <div id="panel-right" class="merge-panel">
+      <div class="panel-content" id="content-right"></div>
+    </div>
+
+  </div>
+
+  <div id="footer">
+    <div id="footer-left">
+      <button id="btn-accept-left"  class="btn-secondary">Accept Left</button>
+      <button id="btn-accept-right" class="btn-secondary">Accept Right</button>
+    </div>
+    <div id="footer-right">
+      <button id="btn-cancel" class="btn-cancel">Cancel</button>
+      <button id="btn-apply"  class="btn-primary">Apply</button>
+    </div>
+  </div>
+
+  <div id="status-bar">
+    <span id="status-conflicts">2 unresolved conflicts // <a href="#" id="status-resolve">Resolve...</a></span>
+    <span id="status-info">
+      <span id="cursor-pos">1:1</span>
+      <span>LF</span>
+      <span>UTF-8</span>
+      <span>4 spaces</span>
+      <span class="merge-branch" id="merge-branch">▲ Merging main</span>
+    </span>
+  </div>
+
+</div>
+
+<script>
+  // Shim VSCode API
+  window.acquireVsCodeApi = () => ({ postMessage: () => {} });
+
+  // Mock state matching the extension's wire format
+  const mockState = {
+    yoursBranchName: 'main',
+    theirsBranchName: 'feature',
+    totalConflicts: 2,
+    yoursBranchName: 'HEAD',
+    theirsBranchName: 'feature',
+    resolvedCount: 0,
+    progressPercent: 0,
+    isFullyResolved: false,
+    // lines[] = full raw file including conflict markers
+    // startLine = index of <<<<<<< line, endLine = index of >>>>>>> line
+    lines: [
+      'import java.util.List;',       // 0  ← normal
+      '',                              // 1  ← normal
+      'public record Book(',           // 2  ← normal
+      '<<<<<<< HEAD',                  // 3  ← c0.startLine
+      '    String publisher,',         // 4  ← c0.yoursLines[0]
+      '    String edition,',           // 5  ← c0.yoursLines[1]
+      '=======',                       // 6  ← c0.separatorLine
+      '    String isbn,',              // 7  ← c0.theirsLines[0]
+      '    int year,',                 // 8  ← c0.theirsLines[1]
+      '    String category,',          // 9  ← c0.theirsLines[2]
+      '>>>>>>> feature',               // 10 ← c0.endLine
+      '    String title',              // 11 ← normal
+      ') {',                           // 12 ← normal
+      '<<<<<<< HEAD',                  // 13 ← c1.startLine
+      '    // main comment',           // 14 ← c1.yoursLines[0]
+      '=======',                       // 15 ← c1.separatorLine
+      '    // feature comment',        // 16 ← c1.theirsLines[0]
+      '    // extra line',             // 17 ← c1.theirsLines[1]
+      '>>>>>>> feature',               // 18 ← c1.endLine
+      '}',                             // 19 ← normal
+    ],
+    conflicts: [
+      {
+        index: 0,
+        startLine: 3,
+        separatorLine: 6,
+        endLine: 10,
+        yoursBranch: 'HEAD',
+        theirsBranch: 'feature',
+        yoursLines:  ['    String publisher,', '    String edition,'],
+        theirsLines: ['    String isbn,', '    int year,', '    String category,'],
+      },
+      {
+        index: 1,
+        startLine: 13,
+        separatorLine: 15,
+        endLine: 18,
+        yoursBranch: 'HEAD',
+        theirsBranch: 'feature',
+        yoursLines:  ['    // main comment'],
+        theirsLines: ['    // feature comment', '    // extra line'],
+      },
+    ],
+    resolutions: [
+      { type: 'unresolved' },
+      { type: 'unresolved' },
+    ],
+  };
+
+  // Inject mock data after script loads
+  window.addEventListener('load', () => {
+    window.dispatchEvent(new MessageEvent('message', {
+      data: {
+        type: 'init',
+        state: mockState,
+        filePath: '/repo/src/Book.java',
+        fileName: 'Book.java',
+      }
+    }));
+  });
+</script>
+<script src="mergeEditor.js"></script>
+</body>
+</html>

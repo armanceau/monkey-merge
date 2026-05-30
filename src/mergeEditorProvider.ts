@@ -55,7 +55,7 @@ export async function openMergeEditor(
 
   const panel = vscode.window.createWebviewPanel(
     'monkeyMergeEditor',
-    `⚡ Merge: ${fileName}`,
+    ` Merge: ${fileName}`,
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
     {
       enableScripts: true,
@@ -185,57 +185,90 @@ function buildHtml(webview: vscode.Webview, context: vscode.ExtensionContext): s
 <body>
 <div id="app">
 
-  <!-- ── Toolbar ──────────────────────────────────── -->
+  <!-- §3 Toolbar (36px) -->
   <div id="toolbar">
-    <div class="tb-group">
-      <button id="btn-prev" class="tb-btn" title="Previous conflict (Alt+↑)">&#9664; Prev</button>
-      <span id="conflict-counter" class="tb-counter">—</span>
-      <button id="btn-next" class="tb-btn" title="Next conflict (Alt+↓)">Next &#9654;</button>
+    <button id="btn-prev"  class="tb-icon" title="Previous conflict (Alt+↑)">↑</button>
+    <button id="btn-next"  class="tb-icon" title="Next conflict (Alt+↓)">↓</button>
+    <button class="tb-icon" title="Jump to conflict">↗</button>
+    <div class="tb-sep"></div>
+    <span class="tb-label">Apply non-conflicting changes:</span>
+    <button id="btn-apply-left"  class="tb-btn">Left</button>
+    <button id="btn-apply-all"   class="tb-btn">All</button>
+    <button id="btn-apply-right" class="tb-btn">Right</button>
+    <div class="tb-sep"></div>
+    <button class="tb-dropdown">Do not ignore</button>
+    <button class="tb-dropdown">Highlight words</button>
+    <div class="tb-spacer"></div>
+    <span id="conflict-counter">— / —</span>
+  </div>
+
+  <!-- §4 Column headers (28px) -->
+  <div id="column-headers">
+    <div class="col-header" id="header-left">
+      Changes from <strong id="branch-left">yours</strong>
+      <a class="show-details" href="#">Show Details</a>
     </div>
-    <div class="tb-group tb-center">
-      <div id="progress-wrap">
-        <div id="progress-fill"></div>
-      </div>
-      <span id="progress-label">0%</span>
-    </div>
-    <div class="tb-group">
-      <button id="btn-apply" class="tb-btn tb-apply" title="Save merged result">&#10003; Apply</button>
-      <button id="btn-abort" class="tb-btn tb-abort" title="Discard and close">&#10007; Abort</button>
+    <div class="col-header-gutter"></div>
+    <div class="col-header" id="header-center">Result</div>
+    <div class="col-header-gutter"></div>
+    <div class="col-header" id="header-right">
+      Changes from <strong id="branch-right">theirs</strong>
+      <a class="show-details" href="#">Show Details</a>
     </div>
   </div>
 
-  <!-- ── Panel headers ────────────────────────────── -->
-  <div id="panel-headers">
-    <div class="ph ph-left">
-      <span class="ph-arrow">&#9668;&#9668;</span>
-      <span id="lbl-yours">Yours</span>
+  <!-- §1 Three-panel merge container (flex: 1) -->
+  <div id="merge-container">
+
+    <!-- LEFT panel (read-only) -->
+    <div id="panel-left" class="merge-panel">
+      <div class="panel-content" id="content-left"></div>
     </div>
-    <div class="ph ph-center">Result</div>
-    <div class="ph ph-right">
-      <span id="lbl-theirs">Theirs</span>
-      <span class="ph-arrow">&#9658;&#9658;</span>
+
+    <!-- §6 Left gutter (LEFT ↔ CENTER, 32px) -->
+    <div id="gutter-left" class="gutter">
+      <canvas id="canvas-left"></canvas>
+    </div>
+
+    <!-- CENTER panel (editable) -->
+    <div id="panel-center" class="merge-panel">
+      <div class="panel-content" id="content-center"></div>
+    </div>
+
+    <!-- §7 Right gutter (CENTER ↔ RIGHT, 32px) -->
+    <div id="gutter-right" class="gutter">
+      <canvas id="canvas-right"></canvas>
+    </div>
+
+    <!-- RIGHT panel (read-only) -->
+    <div id="panel-right" class="merge-panel">
+      <div class="panel-content" id="content-right"></div>
+    </div>
+
+  </div>
+
+  <!-- §11 Footer (48px) -->
+  <div id="footer">
+    <div id="footer-left">
+      <button id="btn-accept-left"  class="btn-secondary">Accept Left</button>
+      <button id="btn-accept-right" class="btn-secondary">Accept Right</button>
+    </div>
+    <div id="footer-right">
+      <button id="btn-cancel" class="btn-cancel">Cancel</button>
+      <button id="btn-apply"  class="btn-primary">Apply</button>
     </div>
   </div>
 
-  <!-- ── Three-way editor ─────────────────────────── -->
-  <div id="editor-wrap">
-    <table id="merge-table">
-      <colgroup>
-        <col class="col-g">   <!-- left gutter  (56px) -->
-        <col class="col-p">   <!-- left pane    (1fr)  -->
-        <col class="col-gc">  <!-- center gutter(22px) -->
-        <col class="col-p">   <!-- center pane  (1fr)  -->
-        <col class="col-g">   <!-- right gutter (56px) -->
-        <col class="col-p">   <!-- right pane   (1fr)  -->
-      </colgroup>
-      <tbody id="merge-body"></tbody>
-    </table>
-  </div>
-
-  <!-- ── Status bar ───────────────────────────────── -->
+  <!-- §12 Status bar (24px) -->
   <div id="status-bar">
-    <span id="status-msg"></span>
-    <span id="status-file"></span>
+    <span id="status-conflicts">Pending Unresolved conflicts // <a href="#" id="status-resolve">Resolve...</a></span>
+    <span id="status-info">
+      <span id="cursor-pos">1:1</span>
+      <span>LF</span>
+      <span>UTF-8</span>
+      <span>4 spaces</span>
+      <span class="merge-branch" id="merge-branch">▲ Merging</span>
+    </span>
   </div>
 
 </div>
